@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+message: >-
+  If you use this pipeline in your research, please cite the article below,
+  in which the underlying molecular dynamics and MM-PBSA methodology was
+  developed and validated.
+title: "Autogromacs: automated, resumable, chunked GROMACS MD pipeline for CHARMM-GUI systems"
+type: software
+authors:
+  - family-names: "Aguilar-Garay"
+    given-names: "Ricardo"
+    affiliation: "Escuela Nacional de Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico"
+  - family-names: "Nicolás-Álvarez"
+    given-names: "Dulce E."
+    affiliation: "Escuela Nacional de Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico"
+license: MIT
+repository-code: "https://github.com/TU_USUARIO/autogromacs"
+keywords:
+  - GROMACS
+  - molecular dynamics
+  - CHARMM-GUI
+  - GPU
+  - MM-PBSA
+  - automation
+preferred-citation:
+  type: article
+  title: "Binding Affinity and Interaction Profiles of Erinacines and Erinacerins with iNOS and NF-κB Revealed by Molecular Dynamics Simulations"
+  authors:
+    - family-names: "Hernandez-Munguia"
+      given-names: "April Michelle"
+    - family-names: "Reyes-Chaparro"
+      given-names: "Andrés"
+    - family-names: "Fregoso-Aguilar"
+      given-names: "Tomas Alejandro"
+    - family-names: "Tenorio-Barajas"
+      given-names: "Aldo Yair"
+    - family-names: "Mendoza-Pérez"
+      given-names: "Jorge Alberto"
+    - family-names: "Aguilar-Garay"
+      given-names: "Ricardo"
+    - family-names: "Nicolás-Álvarez"
+      given-names: "Dulce E."
+  journal: "International Journal of Molecular Sciences"
+  volume: 27
+  issue: 7
+  year: 2026
+  doi: "10.3390/ijms27073145"
+  url: "https://www.mdpi.com/1422-0067/27/7/3145"
+  issn: "1422-0067"
