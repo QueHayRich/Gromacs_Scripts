@@ -64,8 +64,8 @@ fi
 # Flags de mdrun (mismo esquema para 2080 / 3080 / 5090; GROMACS se adapta):
 # HARD = TODO en GPU incluido -update: máximo rendimiento (validado en Gelsolina)
 # SAFE = bonded/update en CPU: rescate automático para CUDA #700 / inestabilidad
-FLAGS_HARD="-pme gpu -nb gpu -bonded gpu -update gpu -pmefft gpu -ntomp ${NTOMP} -pin on"
-FLAGS_SAFE="-pme gpu -nb gpu -pmefft gpu -ntomp ${NTOMP} -pin on"
+FLAGS_HARD="-pme gpu -nb gpu -bonded gpu -update gpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
+FLAGS_SAFE="-pme gpu -nb gpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
 
 # ── Parámetros fijos ────────────────────────────────────────────────────────
 CHUNK_NS=100                     # tamaño de cada tramo (ns)
@@ -135,7 +135,7 @@ if [[ ! -f step4.0_minimization.gro ]]; then
     echo "=== MINIMIZACIÓN ==="
     gmx grompp -f step4.0_minimization.mdp -o step4.0_minimization.tpr \
         -c step3_input.gro -r step3_input.gro -p topol.top -n index.ndx -maxwarn 1 || exit 1
-    gmx mdrun -v -deffnm step4.0_minimization -ntomp "${NTOMP}" || exit 1
+    gmx mdrun -v -deffnm step4.0_minimization -ntmpi 1 -ntomp "${NTOMP}" || exit 1
 else
     echo "✓ Minimización ya hecha, se omite."
 fi
