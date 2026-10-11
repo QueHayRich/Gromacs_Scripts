@@ -21,6 +21,9 @@
 # los flags de mdrun; usa todos los núcleos disponibles (nproc). Si el modo
 # GPU agresivo falla (p.ej. CUDA error #700), reintenta automáticamente en
 # modo estable (bonded/update en CPU) desde el último checkpoint.
+# Compatible con GROMACS 2024 y 2026: -append solo se usa si ya hay .cpt
+# (2026 aborta con -append sin checkpoint) y se desactivan funciones
+# experimentales (CUDA graphs) aunque estén activas en el entorno.
 #
 # Al terminar deja la trayectoria con nombre adaptable:
 #       dynamic<N>ns.{xtc,tpr,edr,log,gro,cpt}      (p.ej. dynamic200ns.xtc)
@@ -36,6 +39,7 @@ if ! command -v gmx >/dev/null 2>&1; then
     for GMXRC in /usr/local/gromacs/bin/GMXRC \
                  /usr/local/gromacs/*/bin/GMXRC \
                  /opt/gromacs/bin/GMXRC \
+                 "$HOME"/software/gromacs-*/bin/GMXRC \
                  "$HOME/gromacs/bin/GMXRC"; do
         if [[ -f "$GMXRC" ]]; then
             # shellcheck disable=SC1090
@@ -49,7 +53,15 @@ if ! command -v gmx >/dev/null 2>&1; then
     echo "   Verifica la instalación de GROMACS en esta máquina."
     exit 1
 fi
-echo "✓ GROMACS: $(command -v gmx)"
+GMX_VER=$(gmx --version 2>/dev/null | awk -F: '/GROMACS version/{gsub(/ /,"",$2); print $2; exit}')
+echo "✓ GROMACS ${GMX_VER:-?}: $(command -v gmx)"
+
+# Sin funciones experimentales en producción (CUDA graphs puede venir activado
+# desde ~/.bashrc en algunas máquinas). Solo afecta a este script.
+if [[ -n "${GMX_CUDA_GRAPH:-}" ]]; then
+    echo "ℹ GMX_CUDA_GRAPH estaba activo en el entorno: se desactiva (experimental)."
+    unset GMX_CUDA_GRAPH
+fi
 
 # ── 0b. Verificar GPU (OBLIGATORIA) y núcleos disponibles ───────────────────
 NTOMP=$(nproc 2>/dev/null || echo 4)
@@ -64,8 +76,9 @@ fi
 # Flags de mdrun (mismo esquema para 2080 / 3080 / 5090; GROMACS se adapta):
 # HARD = TODO en GPU incluido -update: máximo rendimiento (validado en Gelsolina)
 # SAFE = bonded/update en CPU: rescate automático para CUDA #700 / inestabilidad
+#        (-bonded/-update cpu explícitos: en 2026 'auto' deja ambos en GPU)
 FLAGS_HARD="-pme gpu -nb gpu -bonded gpu -update gpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
-FLAGS_SAFE="-pme gpu -nb gpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
+FLAGS_SAFE="-pme gpu -nb gpu -bonded cpu -update cpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
 
 # ── Parámetros fijos ────────────────────────────────────────────────────────
 CHUNK_NS=100                     # tamaño de cada tramo (ns)
@@ -155,8 +168,12 @@ fi
 if [[ ! -f ${PROD}.tpr ]]; then
     FIRST_NS=$(( TOTAL_NS < CHUNK_NS ? TOTAL_NS : CHUNK_NS ))
     echo "=== PRODUCCIÓN: preparando primer tramo de ${FIRST_NS} ns ==="
+    # continuation=yes en el .mdp: tomar velocidades/estado exactos del .cpt de
+    # la equilibración (más preciso que el .gro) si existe
+    EQ_CPT=""
+    [[ -f step4.1_equilibration.cpt ]] && EQ_CPT="-t step4.1_equilibration.cpt"
     gmx grompp -f "$PROD_MDP" -o ${PROD}.tpr \
-        -c step4.1_equilibration.gro -p topol.top -n index.ndx -maxwarn 1 || exit 1
+        -c step4.1_equilibration.gro $EQ_CPT -p topol.top -n index.ndx -maxwarn 1 || exit 1
     # Fijar nsteps del primer tramo escribiendo a un temporal y luego mv
     gmx convert-tpr -s ${PROD}.tpr -nsteps "$(ns_to_steps "$FIRST_NS")" -o ${PROD}_tmp.tpr || exit 1
     mv -f ${PROD}_tmp.tpr ${PROD}.tpr
@@ -182,23 +199,57 @@ GPU_PID=$!
 cleanup(){ [[ -n "$GPU_PID" ]] && kill "$GPU_PID" 2>/dev/null || true; }
 trap cleanup EXIT
 
+# Flags de continuación: -cpi/-append SOLO si ya existe el .cpt. GROMACS 2026
+# aborta con "-append" sin checkpoint (otras versiones pueden tolerarlo). Se evalúa en cada
+# intento para que el reintento SAFE continúe desde el .cpt que dejó el HARD.
+cpt_flags(){
+    if [[ -f ${PROD}.cpt ]]; then
+        echo "-cpi ${PROD}.cpt -append"
+    fi
+}
+
+# Interrupciones (Ctrl-C, kill, apagado): mdrun se detiene ordenadamente,
+# guarda checkpoint y sale con código 1 — igual que un fallo real. Para NO
+# confundirlo con un fallo de GPU (y saltar a SAFE) se detecta por:
+#   a) la señal llegando al propio script (Ctrl-C en la terminal), o
+#   b) el mensaje "Received the ... signal" que mdrun escribe en su log
+#      (cuando se mata solo el proceso mdrun, p.ej. con nohup + kill).
+INTERRUPTED=0
+trap 'INTERRUPTED=1' INT TERM HUP
+# Solo se miran las líneas del log escritas en ESTE intento (LOG_START), para
+# no confundir un aviso de señal de una corrida anterior con la actual.
+log_lines(){ local n; n=$(wc -l < ${PROD}.log 2>/dev/null); echo "${n:-0}"; }
+log_says_signal(){
+    local start=$LOG_START
+    (( $(log_lines) < start )) && start=0     # mdrun creó un log nuevo
+    awk -v a="$start" 'NR>a && /Received the .* signal/{f=1} END{exit !f}' \
+        ${PROD}.log 2>/dev/null
+}
+stop_if_interrupted(){
+    if (( INTERRUPTED )) || log_says_signal; then
+        echo "⏹ mdrun interrumpido por señal; el checkpoint quedó guardado."
+        echo "   Re-ejecuta 'bash Autogromacs.sh' (sin argumentos) para reanudar."
+        exit 130
+    fi
+}
+
 # Un tramo de mdrun con reintento automático en modo estable.
-# Nota: -cpi con un .cpt inexistente es seguro (mdrun simplemente inicia de cero),
-# y -append es la conducta deseada al continuar.
 run_chunk(){
     echo "── mdrun [HARD: todo en GPU, máximo rendimiento] ──"
-    if gmx mdrun -v -deffnm ${PROD} -s ${PROD}.tpr -cpi ${PROD}.cpt -append $FLAGS_HARD; then
-        return 0
-    fi
+    LOG_START=$(log_lines)
+    gmx mdrun -v -deffnm ${PROD} -s ${PROD}.tpr $(cpt_flags) $FLAGS_HARD && return 0
+    stop_if_interrupted
     echo "⚠ El modo HARD falló (¿CUDA #700 / inestabilidad?)."
     echo "🚑 Reintentando en MODO SAFE (bonded/update en CPU) desde el checkpoint..."
-    gmx mdrun -v -deffnm ${PROD} -s ${PROD}.tpr -cpi ${PROD}.cpt -append $FLAGS_SAFE
+    LOG_START=$(log_lines)
+    gmx mdrun -v -deffnm ${PROD} -s ${PROD}.tpr $(cpt_flags) $FLAGS_SAFE
 }
 
 # Bucle de tramos: corre/continúa hasta TARGET_NS, luego extiende, hasta TOTAL_NS
 while :; do
     echo "── Producción: corriendo/continuando hasta ${TARGET_NS} ns ──"
     if ! run_chunk; then
+        stop_if_interrupted
         echo "❌ mdrun falló incluso en modo estable. Revisa ${PROD}.log"
         echo "   (busca LINCS warnings o energía positiva: el sistema pudo explotar)."
         exit 1
