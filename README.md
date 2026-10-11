@@ -19,7 +19,9 @@ Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico.
   manual `nsteps` arithmetic.
 - **Arbitrary simulation length via chunked production.** Production runs in
   100 ns segments: the script runs a segment, extends the run input file with
-  `gmx convert-tpr -extend`, and continues with `gmx mdrun -cpi -append`.
+  `gmx convert-tpr -extend`, and continues with `gmx mdrun -cpi -append`
+  (`-cpi/-append` are only passed once a checkpoint exists, so the very first
+  segment starts cleanly on every GROMACS version).
   Because output is appended to the same files, the final trajectory is a
   **single continuous `.xtc`** with no duplicated frames and no need for
   `gmx trjcat`.
@@ -29,15 +31,28 @@ Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico.
   persisted in a hidden state file, and the *authoritative* simulation target
   is always read back from the current `.tpr` itself (`gmx dump`), so no
   desynchronization between script state and simulation state is possible.
+- **Clean handling of interruptions.** Ctrl-C, `kill`, or a shutdown make
+  `mdrun` stop gracefully and write a checkpoint. The script recognizes this
+  (signal trap + the `Received the ... signal` line in the current segment of
+  the `mdrun` log) and exits with code 130 instead of mistaking it for a GPU
+  failure; re-running the script resumes the run.
 - **Maximum-performance GPU offload with automatic fallback.** Each
   production segment first attempts the full-offload configuration
   (`-nb gpu -pme gpu -pmefft gpu -bonded gpu -update gpu`). If the run fails
   mid-segment (e.g., CUDA error #700 / GPU instability), the script
   automatically restarts **from the last checkpoint** in a stable
-  configuration (bonded interactions and integration on CPU) without any
-  user intervention.
+  configuration (`-bonded cpu -update cpu`, set explicitly because recent
+  GROMACS versions keep `update` on the GPU under `auto`) without any user
+  intervention.
+- **Multi-version GROMACS support.** Designed for GROMACS 2024 and 2026 builds
+  (tested on 2026.4).
+  The detected version is printed at start-up.
+- **No experimental features in production.** If `GMX_CUDA_GRAPH` is set in
+  the environment (e.g., from `~/.bashrc`), it is unset for the run, since
+  GROMACS flags CUDA graphs as experimental.
 - **Hardware-portable across the lab.** The script locates the GROMACS
-  installation (PATH first, then standard `GMXRC` locations), verifies that
+  installation (PATH first, then standard `GMXRC` locations, including
+  `~/software/gromacs-*/`), verifies that
   an NVIDIA GPU is present (aborting cleanly otherwise), and sets OpenMP
   threads from `nproc`. The same file runs unmodified on an RTX 2080, 3080,
   or 5090 workstation.
@@ -58,7 +73,7 @@ Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico.
 | Component | Requirement |
 |---|---|
 | OS | Linux (tested on Ubuntu) |
-| GROMACS | GPU-enabled (CUDA) build; `gmx` on `PATH` or `GMXRC` in a standard location (`/usr/local/gromacs/bin/GMXRC` preferred) |
+| GROMACS | 2024 or 2026, GPU-enabled (CUDA) build; `gmx` on `PATH` or `GMXRC` in a standard location (`/usr/local/gromacs/bin/GMXRC` preferred) |
 | GPU | NVIDIA GPU with working driver (`nvidia-smi`) — **mandatory** |
 | Input system | CHARMM-GUI **Solution Builder** output (`gromacs/` folder) |
 
@@ -89,7 +104,7 @@ bash Autogromacs.sh
 # Non-interactive (recommended for long runs under nohup):
 nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &
 
-# After a power failure / crash — just run it again, it resumes:
+# After a power failure / crash / Ctrl-C — just run it again, it resumes:
 bash Autogromacs.sh
 ```
 
@@ -104,10 +119,13 @@ bash Autogromacs.sh
    (position restraints referenced to `step3_input.gro`), skipped if outputs
    exist. Equilibration runs on GPU in the stable configuration.
 4. **Production, chunked**:
-   - First segment: `grompp` builds `step5_production.tpr`, then
+   - First segment: `grompp` builds `step5_production.tpr` (reading the exact
+     equilibrated state from `step4.1_equilibration.cpt` with `-t`, as
+     required by `continuation = yes`), then
      `convert-tpr -nsteps` trims it to min(total, 100) ns.
-   - Loop: `mdrun -cpi -append` (full GPU offload; automatic stable-mode
-     retry on failure) → read achieved target from the `.tpr` → if the total
+   - Loop: `mdrun` (with `-cpi -append` once a checkpoint exists; full GPU
+     offload; automatic stable-mode retry on failure, clean exit on
+     interruption) → read achieved target from the `.tpr` → if the total
      is not yet reached, `convert-tpr -extend` by the next chunk → repeat.
    - The timestep `dt` is parsed from the production `.mdp` (fallback
      0.002 ps), so step arithmetic is always consistent with the actual run.
