@@ -10,8 +10,9 @@ authors:
     given-names: "Ricardo"
     affiliation: "Escuela Nacional de Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico"
   - family-names: "Nicolás-Álvarez"
-    given-names: "Dulce E."
-    affiliation: "Escuela Nacional de Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico"
+    given-names: "Dulce Estefanía"
+    affiliation: "Departamento de Fisiología, Escuela Nacional de Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico"
+    email: "dnicolas@ipn.mx"
 license: MIT
 repository-code: "https://github.com/TU_USUARIO/autogromacs"
 keywords:

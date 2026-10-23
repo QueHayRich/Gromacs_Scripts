@@ -144,18 +144,31 @@ dynamic<N>ns.cpt    # final checkpoint
 gpu_monitor.log     # GPU telemetry during the run
 ```
 
+## Companion scripts
+
+- **`basic_analyses_with_names.sh`** — post-processing of the production
+  trajectory: centered trajectory, ligand RMSD, protein–ligand H-bonds (or
+  contacts for C/H-only ligands such as microplastics), RMSF, radius of
+  gyration and PDB snapshots. Selects GROMACS groups **by name**, so it works
+  on any system without editing. See
+  [`README_basic_analyses.md`](README_basic_analyses.md).
+
 ## Roadmap (in development)
 
-- **`basic_analyses.sh`** — companion post-processing script that
-  auto-detects `dynamic<N>ns.*` output and produces the standard quality and
-  interaction analyses used in our published workflow: backbone RMSD, RMSF,
-  radius of gyration, hydrogen bonds, ligand–protein minimum distance, and
-  **short-range Lennard-Jones / Coulomb interaction energies**
+- **Short-range Lennard-Jones / Coulomb interaction energies**
   (`gmx energy` on energygrps).
 - **MM-PBSA module** — binding free energy calculation (ΔG_bind ± SEM) with
   per-residue energy decomposition, following the protocol validated in the
   reference publication below. *This module will be updated in a future
   release.*
+
+## Authors and contributors
+
+- **Ricardo Aguilar-Garay** — author and maintainer
+  (ricardoaguilargaray@gmail.com)
+- **Dra. Dulce Estefanía Nicolás Álvarez** — contributor. Departamento de
+  Fisiología, Escuela Nacional de Ciencias Biológicas, Instituto Politécnico
+  Nacional (ENCB-IPN), Mexico (dnicolas@ipn.mx)
 
 ## Citing this pipeline
 

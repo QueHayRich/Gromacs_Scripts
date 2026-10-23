@@ -29,6 +29,11 @@
 #       dynamic<N>ns.{xtc,tpr,edr,log,gro,cpt}      (p.ej. dynamic200ns.xtc)
 #
 # Proyecto: Maydelis Viltres-Acosta — MPs <-> Daphnia magna
+#
+# Autor        : Ricardo Aguilar-Garay (ricardoaguilargaray@gmail.com)
+# Contribuidora: Dra. Dulce Estefanía Nicolás Álvarez (dnicolas@ipn.mx)
+#                Departamento de Fisiología, Escuela Nacional de Ciencias
+#                Biológicas, Instituto Politécnico Nacional (ENCB-IPN)
 ###############################################################################
 set -uo pipefail
 
