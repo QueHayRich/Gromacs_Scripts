@@ -1,7 +1,8 @@
 # Basic Analyses — detailed documentation
 
 [← Back to the repository overview](../README.md) ·
-[← Autogromacs](Autogromacs.md)
+[← Autogromacs](Autogromacs.md) ·
+[Free Energy →](free_energy.md)
 
 **Standard post-processing of Autogromacs trajectories, selecting GROMACS
 groups by name instead of by number.**

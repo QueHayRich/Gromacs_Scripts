@@ -1,16 +1,26 @@
-# Gromacs_Scripts — Autogromacs & Basic Analyses
+# Gromacs_Scripts — Autogromacs, Basic Analyses & Free Energy
 
 **Automated GROMACS molecular dynamics for CHARMM-GUI systems: from the
-downloaded `gromacs/` folder to ready-to-plot results with two commands.**
+downloaded `gromacs/` folder to analyses and binding energies, one command
+per step.**
 
 Developed at the Laboratorio de Hormonas y Conducta, Escuela Nacional de
 Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico.
 
 ```
-CHARMM-GUI gromacs/ ──► Autogromacs.sh ──► dynamic<N>ns.xtc ──► basic_analyses_with_names.sh ──► Analyses/*.xvg, *.pdb
-                        (minimization,                          (RMSD, H-bonds/contacts, RMSF,
-                         equilibration,                          radius of gyration, snapshots)
-                         production)
+CHARMM-GUI gromacs/
+      │
+      ▼
+ Autogromacs.sh ──────────────► dynamic<N>ns.xtc / .tpr
+ (minimization, equilibration,        │
+  production)                         ├──► basic_analyses_with_names.sh ──► Analyses/*.xvg, *.pdb
+                                      │    (RMSD, H-bonds/contacts, RMSF, Rg, snapshots)
+                                      │
+                                      └──► free_energy.sh ──► Analyses/FreeEnergy_*/summary.csv
+                                           (MM-GBSA, LJ/Coulomb, validation)
+                                                 │  all systems
+                                                 ▼
+                                           collect_free_energy.py ──► one Excel workbook
 ```
 
 ---
@@ -61,13 +71,43 @@ bash basic_analyses_with_names.sh
 
 📖 **[Full Basic Analyses documentation →](docs/basic_analyses.md)**
 
+### ⚡ Free Energy — binding energetics
+
+`free_energy.sh` computes how strongly the ligand binds the protein, and
+`collect_free_energy.py` gathers the results of all your systems into one
+Excel workbook.
+
+- **Nothing to choose:** receptor and ligand are detected from `topol.top`
+  (proteins = receptor; water and ions ignored; the rest = ligand). If the
+  system is ambiguous, it stops and tells you which option to add.
+- **MM-GBSA** with gmx_MMPBSA (GB-OBC II, mbondi2, 0.15 M salt): ΔH with
+  mean ± SEM, C2 entropy, ligand efficiency and the **key residues**
+  (per-residue decomposition).
+- **Direct LJ / Coulomb interaction energy** receptor–ligand
+  (`mdrun -rerun` with energy groups).
+- **Validation** on the same frames: H-bonds, contacts, minimum distance and
+  ligand RMSD, with **quality flags** (ligand unbound or displaced,
+  unreliable entropy, high error...).
+- **One Excel for all systems:** paper-ready summary table (mean ± SEM),
+  kcal/mol and kJ/mol sheets, key residues, metadata and legend.
+- **Resumable**, like the other tools.
+
+```bash
+bash free_energy.sh --check      # see what was detected (computes nothing)
+bash free_energy.sh              # MM-GBSA + LJ/Coulomb + validation
+python3 collect_free_energy.py /path/Project_A /path/Project_B -o Energies.xlsx
+```
+
+📖 **[Full Free Energy documentation →](docs/free_energy.md)** ·
+guía rápida en español: [`LEEME_free_energy.txt`](LEEME_free_energy.txt)
+
 ---
 
 ## Quick start
 
 ```bash
 cd /path/to/my_system/gromacs            # CHARMM-GUI Solution Builder output
-cp /path/to/Gromacs_Scripts/*.sh .
+cp /path/to/Gromacs_Scripts/*.sh .                  # the three tools
 
 # 1. Simulate — choose ONE of the two options:
 bash Autogromacs.sh                                       # a) interactive: it asks
@@ -76,6 +116,12 @@ nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # b) background: length
 
 # 2. Analyse
 bash basic_analyses_with_names.sh
+
+# 3. Binding energetics
+bash free_energy.sh
+
+# 4. Once all systems are done, from any folder: one Excel for all of them
+python3 collect_free_energy.py /path/to/project_folder
 ```
 
 Option **a** is the simplest: run the script and type the number of ns when
@@ -86,15 +132,14 @@ background, so you can close the terminal or log out; follow it with
 
 **Requirements:** Linux, GROMACS 2024/2026 with CUDA, an NVIDIA GPU (for the
 simulation; the analyses run on CPU) and a CHARMM-GUI Solution Builder
-`gromacs/` folder. Details in each tool's documentation.
+`gromacs/` folder. Free Energy also needs a conda environment with
+[gmx_MMPBSA](https://valdes-tresanco-ms.github.io/gmx_MMPBSA/) and, for the
+Excel file, `openpyxl`. Details in each tool's documentation.
 
 ## Roadmap
 
-- **Short-range Lennard-Jones / Coulomb interaction energies**
-  (`gmx energy` on energygrps).
-- **MM-PBSA / MM-GBSA module**: binding free energy (ΔG_bind ± SEM) with
-  per-residue decomposition, following the protocol validated in the
-  reference publication below.
+- **MM-PBSA (Poisson–Boltzmann)** option in Free Energy, alongside the
+  current MM-GBSA.
 - Support for CHARMM-GUI Membrane Builder systems.
 
 ## Authors and contributors

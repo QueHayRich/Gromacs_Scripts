@@ -1,0 +1,203 @@
+================================================================================
+ free_energy.sh + collect_free_energy.py — GUIA DE USO
+ (companeros de Autogromacs.sh y basic_analyses_with_names.sh)
+================================================================================
+
+1. LA IDEA
+--------------------------------------------------------------------------------
+Igual que Autogromacs y basic_analyses: copias UN archivo en la carpeta
+gromacs/ de CHARMM-GUI (despues de terminar la dinamica) y lo ejecutas:
+
+    bash free_energy.sh
+
+No hay que elegir grupos ni numeros del menu de make_ndx. El script lee
+topol.top y decide solo:
+    - Receptor = la(s) proteina(s)  (PROA, PROB, ...)
+    - Se ignoran = agua (TIP3) e iones (POT, CLA, SOD, ...)
+    - Ligando  = lo que queda (OLE, el hexamero de PET, PIP2, ...)
+
+Antes de calcular imprime lo que detecto (receptor, ligando, atomos pesados,
+cargas, ventana, temperatura). Si algo es ambiguo, SE DETIENE y te dice que
+opcion agregar. Nunca adivina en silencio.
+
+
+2. QUE ELEGIR: NADA (los defaults son el protocolo recomendado)
+--------------------------------------------------------------------------------
+Default (lo que corre si no pones nada):
+    - Ventana: del 25% de la trayectoria al final  (200 ns -> 50-200 ns)
+    - ~300 frames  (200 ns -> uno cada 500 ps)
+    - MM-GBSA: igb=5, radios mbondi2, sal 0.15 M, T leida del .tpr,
+      entropia C2, descomposicion por residuo
+    - Energia de interaccion LJ/Coulomb (rerun)
+    - Validacion: puentes de H, contactos <4 A, distancia minima, RMSD ligando
+
+Sugerencias segun la situacion:
+
+  Situacion                                    Que poner
+  -------------------------------------------  -----------------------------------
+  Primera vez en un sistema (recomendado)      bash free_energy.sh --check
+    -> solo muestra lo detectado, 1 segundo      y luego:  bash free_energy.sh
+  Caso normal (proteina + 1 ligando)           bash free_energy.sh
+  Solo quiero la energia LJ (rapido)           bash free_energy.sh lj
+  Solo MM-GBSA                                 bash free_energy.sh mmgbsa
+  Quiero que vaya mas rapido                   bash free_energy.sh --no-decomp
+                                               (sin residuos clave)
+  El RMSD indica que se estabiliza tarde       bash free_energy.sh --start 80
+    (p.ej. meseta a los 80 ns)                   (MISMA ventana en todos los
+                                                  sistemas que vayas a comparar)
+  Mas/menos frames                             --frames 500   /  --frames 200
+  Se detiene: "more than one candidate         --ligand NOMBRE  (el que indica
+    ligand" (dos ligandos, cofactor...)          el mensaje; o NOMBRE1,NOMBRE2)
+  Complejo proteina-proteina                   --ligand PROB   (receptor = PROA)
+  Cambiar el env de conda de gmx_MMPBSA        --env NOMBRE   o   --env ask
+  Ya corrio pero quiero rehacer la tabla       bash free_energy.sh summary
+  El nombre del sistema sale generico          --name Gelsolina_LPA
+    (por defecto usa la primera carpeta arriba de gromacs/ que no sea
+     generica: se saltan gromacs, charmm-gui-*, complex, system, md, ...)
+
+EL AMBIENTE DE CONDA (gmx_MMPBSA):
+    - "gmx"/"gmx_mpi" es el GROMACS del sistema (trjconv, rerun). gmx_MMPBSA
+      vive aparte, en un ambiente de conda. Son dos cosas distintas.
+    - La PRIMERA vez que corres el script en una terminal, busca los
+      ambientes que tienen gmx_MMPBSA y te PREGUNTA cual usar:
+          1) gmxMMPBSA   /home/.../miniconda3/envs/gmxMMPBSA
+          Number or env name [Enter = gmxMMPBSA]:
+      Enter acepta la sugerencia. La respuesta se guarda en
+      ~/.config/free_energy/conda_env y ya no vuelve a preguntar (sirve para
+      los 13 sistemas y para nohup).
+    - Para elegir otro despues:   bash free_energy.sh --env ask
+      o directo:                  bash free_energy.sh --env OTRO_ENV
+    - El env elegido aparece en el reporte inicial (linea "gmx_MMPBSA :").
+    - En modo "lj" no se necesita conda.
+    - Funciona aunque conda no este en el PATH (p.ej. con nohup): lo busca
+      en ~/miniconda3, ~/anaconda3, ~/miniforge3, ~/mambaforge, /opt/conda.
+
+REGLA DE ORO: para comparar sistemas entre si (endogenos vs microplasticos),
+TODOS deben correr con las mismas opciones. Con los defaults ya se cumple.
+
+
+3. QUE GENERA (dentro de Analyses/)
+--------------------------------------------------------------------------------
+    Analyses/FreeEnergy_<sistema>_<N>ns/
+        detected_system.txt   lo que detecto (para tu bitacora)
+        index_FE.ndx          grupos Receptor, Ligand, Complex, ...
+        window.xtc            los frames usados (comunes a todos los calculos)
+        MMGBSA/               salida de gmx_MMPBSA (FINAL_RESULTS_MMPBSA.dat,
+                              per-frame .csv, descomposicion, gmx_MMPBSA.out)
+        LJ/                   rerun: lj_coul.xvg, energy_stdout.txt
+        validation/           hbonds.xvg, numcont.xvg, mindist.xvg, ligand_rmsd.xvg
+        summary.csv           UNA fila con todos los resultados del sistema
+        top_residues.csv      los 10 residuos que mas aportan
+
+Al final imprime un resumen en pantalla (kcal/mol) y los FLAGS.
+Es reanudable: si se interrumpe, vuelves a correrlo y salta lo ya hecho.
+
+
+4. EL EXCEL: collect_free_energy.py
+--------------------------------------------------------------------------------
+Se corre UNA vez, desde donde quieras, pasandole las carpetas padre:
+
+    python3 collect_free_energy.py /ruta/Microplasticos \
+            /ruta/Maydelis/Ligandos_Endogenos  -o Energias_ronda2.xlsx
+
+    - Busca todos los summary.csv dentro de esas carpetas (a cualquier
+      profundidad). No hace falta mover ni juntar carpetas.
+    - El nombre de cada carpeta padre se vuelve la columna "Group"
+      (Microplasticos / Ligandos_Endogenos). Para otro nombre:
+      --labels Microplasticos,Endogenos
+    - DONDE SE GUARDA: en la carpeta desde donde ejecutas el comando.
+      Sin -o se llama FreeEnergy_summary_<fecha>.xlsx. Con -o eliges
+      nombre y ruta (p.ej. -o ~/Documents/Maydelis/Energias_ronda2.xlsx).
+    - Necesita openpyxl. Para verificarlo:
+          python3 collect_free_energy.py --check-deps
+      Si falta, el script:
+          1) busca un ambiente de conda que lo tenga (gmxMMPBSA primero) y se
+             vuelve a ejecutar solo con ese python;
+          2) si no hay, muestra una ALARMA con los comandos de instalacion:
+               python3 -m pip install --user openpyxl          (Ubuntu 22.04)
+               sudo apt install python3-openpyxl               (Ubuntu 23.04+)
+               conda activate gmxMMPBSA && pip install openpyxl
+          3) si estas en la terminal, pregunta si quieres instalarlo ahora;
+          4) si no se instala, escribe las mismas tablas como CSV.
+      --no-install evita la pregunta (util en scripts/nohup).
+      free_energy.sh tambien avisa al final si openpyxl no esta.
+
+Hojas del Excel:
+    Summary       tabla lista para articulo: promedio ± SEM (kcal/mol)
+    Data_kcal     todos los numeros (promedio, SD, SEM) en kcal/mol
+    Data_kJ       lo mismo en kJ/mol
+    Top_residues  residuos clave por sistema
+    Metadata      ventana, frames, temperatura, versiones, notas, ruta
+    Legend        que significa cada columna y cada flag
+
+
+5. CORRER LOS 13 SISTEMAS DE UNA VEZ
+--------------------------------------------------------------------------------
+Paso 0 — en una terminal, una sola vez, elegir el env de conda (pregunta y
+         lo recuerda):   cd <un sistema>/gromacs && bash free_energy.sh --check
+
+Paso 1 — revisar deteccion en todos (segundos):
+
+    for d in $(find /ruta/Microplasticos /ruta/Maydelis/Ligandos_Endogenos \
+               -name "dynamic*ns.xtc" -printf '%h\n' | sort -u); do
+        cp ~/scripts/free_energy.sh "$d"/
+        (cd "$d" && bash free_energy.sh --check)
+    done
+
+Paso 2 — si todo se ve bien, calcular (dejarlo corriendo con nohup):
+
+    nohup bash -c 'for d in $(find /ruta/Microplasticos /ruta/Maydelis/Ligandos_Endogenos \
+        -name "dynamic*ns.xtc" -printf "%h\n" | sort -u); do
+        (cd "$d" && bash free_energy.sh); done' > free_energy_all.log 2>&1 &
+
+Paso 3 — juntar:   python3 collect_free_energy.py /ruta/Microplasticos /ruta/Maydelis/Ligandos_Endogenos
+
+
+6. COMO LEER LOS RESULTADOS
+--------------------------------------------------------------------------------
+    dH (MM-GBSA)  = la cantidad principal para comparar afinidades.
+    E_LJ          = comparacion directa de dispersion (justa entre ligandos
+                    cargados y neutros).
+    E_Coul, E_int = informativos. Se calculan en vacio: en ligandos cargados
+                    (oleato, araquidonato, LPA, PIP2) salen muy grandes y NO
+                    deben usarse solos para decir "se une mas fuerte".
+    -TdS (C2), dG = solo si NO aparece el flag C2_UNRELIABLE.
+    LE, E_LJ/HA   = normalizados por atomo pesado (los hexameros de LDPE,
+                    PET y PC tienen tamanos muy distintos).
+    NO llamar "energia libre de union" a E_LJ ni a E_int: son energias de
+    interaccion.
+
+FLAGS:
+    OK                todo en orden
+    C2_UNRELIABLE     fluctuacion > 3.6 kcal/mol: reportar dH, no dG(C2)
+    HIGH_SEM          SEM de dH > 1 kcal/mol (mas frames o ventana mas larga)
+    POSITIVE_dH       union desfavorable: revisar la trayectoria
+    LIGAND_UNBOUND    el ligando se separo (>4.5 A) en >10% de los frames:
+                      el promedio NO representa el complejo
+    LIGAND_DISPLACED  RMSD del ligando > 1 nm: cambio de sitio
+    FEW_FRAMES        menos de 100 frames
+
+
+7. PROBLEMAS FRECUENTES
+--------------------------------------------------------------------------------
+    "AUTO-DETECTION STOPPED"  -> leer el mensaje: dice que opcion agregar.
+    "System net charge is not zero" -> revisar topol.top (faltan iones?).
+    gmx_MMPBSA falla          -> ver MMGBSA/gmx_MMPBSA.out y gmx_MMPBSA.log.
+                                 Si el gmx del env no lee el .tpr (version mas
+                                 vieja), el script usa automaticamente el
+                                 GROMACS del sistema.
+    MPI falla                 -> reintenta solo en serie (mas lento) o usa --np 1.
+    Rehacer un paso           -> borrar su archivo de salida y volver a correr:
+                                 MMGBSA/FINAL_RESULTS_MMPBSA.dat, LJ/lj_coul.xvg,
+                                 window.xtc (este rehace todo lo que depende de el).
+
+NOTA DE VALIDACION: los scripts se probaron con la topologia real del complejo
+gastrotropina-oleato y con salidas simuladas de GROMACS y gmx_MMPBSA. Antes de
+lanzar los 13 sistemas, correr uno completo y revisar MMGBSA/gmx_MMPBSA.out.
+================================================================================
+
+Autor: Ricardo Aguilar-Garay (ricardoaguilargaray@gmail.com)
+Contribuidora: Dulce Estefanía Nicolás Álvarez, Departamento de Fisiologia,
+               ENCB-IPN (dnicolas@ipn.mx)
+Documentacion completa (en ingles): docs/free_energy.md
+================================================================================
