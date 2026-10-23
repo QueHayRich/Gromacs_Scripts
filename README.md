@@ -33,7 +33,8 @@ equilibration → production) on an NVIDIA GPU for any length you ask for.
 - **Portable:** same file on RTX 2080 / 3080 / 5090, GROMACS 2024 and 2026.
 
 ```bash
-nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &
+bash Autogromacs.sh                                       # asks how many ns → type 200
+nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # or give them directly, in background
 ```
 
 📖 **[Full Autogromacs documentation →](docs/Autogromacs.md)**
@@ -68,9 +69,20 @@ bash basic_analyses_with_names.sh
 cd /path/to/my_system/gromacs            # CHARMM-GUI Solution Builder output
 cp /path/to/Gromacs_Scripts/*.sh .
 
-nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # 1. simulate 200 ns
-bash basic_analyses_with_names.sh                         # 2. analyse
+# 1. Simulate — choose ONE of the two options:
+bash Autogromacs.sh                                       # a) interactive: it asks
+                                                          #    "¿Cuántos ns...?" → type 200 (or any length)
+nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # b) background: length as argument
+
+# 2. Analyse
+bash basic_analyses_with_names.sh
 ```
+
+Option **a** is the simplest: run the script and type the number of ns when
+asked. Keep the terminal open until it finishes. Option **b** runs in the
+background, so you can close the terminal or log out; follow it with
+`tail -f autogromacs.log`. To resume after an interruption, run
+`bash Autogromacs.sh` again with no number.
 
 **Requirements:** Linux, GROMACS 2024/2026 with CUDA, an NVIDIA GPU (for the
 simulation; the analyses run on CPU) and a CHARMM-GUI Solution Builder
