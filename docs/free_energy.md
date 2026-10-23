@@ -1,3 +1,6 @@
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](free_energy.md)
+[![Español](https://img.shields.io/badge/lang-Español-green.svg)](free_energy.es.md)
+
 # Free Energy — detailed documentation
 
 [← Back to the repository overview](../README.md) ·

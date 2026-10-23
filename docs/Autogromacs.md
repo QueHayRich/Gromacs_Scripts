@@ -1,3 +1,6 @@
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](Autogromacs.md)
+[![Español](https://img.shields.io/badge/lang-Español-green.svg)](Autogromacs.es.md)
+
 # Autogromacs — detailed documentation
 
 [← Back to the repository overview](../README.md) ·

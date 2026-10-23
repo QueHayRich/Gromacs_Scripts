@@ -1,3 +1,6 @@
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md)
+[![Español](https://img.shields.io/badge/lang-Español-green.svg)](README.es.md)
+
 # Gromacs_Scripts — Autogromacs, Basic Analyses & Free Energy
 
 **Automated GROMACS molecular dynamics for CHARMM-GUI systems: from the

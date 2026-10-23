@@ -199,5 +199,5 @@ lanzar los 13 sistemas, correr uno completo y revisar MMGBSA/gmx_MMPBSA.out.
 Autor: Ricardo Aguilar-Garay (ricardoaguilargaray@gmail.com)
 Contribuidora: Dulce Estefanía Nicolás Álvarez, Departamento de Fisiologia,
                ENCB-IPN (dnicolas@ipn.mx)
-Documentacion completa (en ingles): docs/free_energy.md
+Documentacion completa: docs/free_energy.es.md (espanol) y docs/free_energy.md (ingles)
 ================================================================================
