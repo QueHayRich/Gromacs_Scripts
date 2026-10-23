@@ -14,7 +14,7 @@ authors:
     affiliation: "Departamento de Fisiología, Escuela Nacional de Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico"
     email: "dnicolas@ipn.mx"
 license: MIT
-repository-code: "https://github.com/TU_USUARIO/autogromacs"
+repository-code: "https://github.com/QueHayRich/Gromacs_Scripts"
 keywords:
   - GROMACS
   - molecular dynamics

@@ -6,7 +6,7 @@
 # Contact: ricardoaguilargaray@gmail.com
 #          (questions, bug reports, and suggestions are welcome)
 #
-# Contributor: Dra. Dulce Estefanía Nicolás Álvarez
+# Contributor: Dulce Estefanía Nicolás Álvarez
 #              Departamento de Fisiología, Escuela Nacional de Ciencias
 #              Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico
 #              dnicolas@ipn.mx

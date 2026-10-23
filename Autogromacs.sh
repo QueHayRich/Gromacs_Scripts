@@ -31,7 +31,7 @@
 # Proyecto: Maydelis Viltres-Acosta — MPs <-> Daphnia magna
 #
 # Autor        : Ricardo Aguilar-Garay (ricardoaguilargaray@gmail.com)
-# Contribuidora: Dra. Dulce Estefanía Nicolás Álvarez (dnicolas@ipn.mx)
+# Contribuidora: Dulce Estefanía Nicolás Álvarez (dnicolas@ipn.mx)
 #                Departamento de Fisiología, Escuela Nacional de Ciencias
 #                Biológicas, Instituto Politécnico Nacional (ENCB-IPN)
 ###############################################################################
@@ -287,5 +287,5 @@ rm -f "$STATE"
 
 echo "═══════════════════════════════════════════════════════════════════════"
 echo " LISTO. Trayectoria de ${TOTAL_NS} ns:  ${FINAL}.xtc  /  ${FINAL}.tpr"
-echo " Siguiente paso: bash basic_analyses.sh   (auto-detecta ${FINAL})"
+echo " Siguiente paso: bash basic_analyses_with_names.sh  (auto-detecta ${FINAL})"
 echo "═══════════════════════════════════════════════════════════════════════"
