@@ -10,6 +10,23 @@ per step.**
 Developed at the Laboratorio de Hormonas y Conducta, Escuela Nacional de
 Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico.
 
+The scripts do not depend on the protein or the ligand: they work for any
+protein–ligand complex (microplastic oligomers, drugs, metabolites,
+endogenous ligands...) or apo protein prepared with CHARMM-GUI.
+
+> **Soluble proteins only — no membranes.** This repository is designed for
+> protein–ligand systems in water (CHARMM-GUI **Solution Builder** /
+> **Ligand Reader & Modeler**). Membrane systems (CHARMM-GUI Membrane
+> Builder: membrane proteins, lipid bilayers) are **out of scope**: their
+> equilibration protocol and file names are different, and the scripts are
+> not meant to run them.
+
+**Script language:** `Autogromacs.sh` and `basic_analyses_with_names.sh`
+print their messages in English; `Autogromacs.es.sh` and
+`basic_analyses_with_names.es.sh` are the same scripts in Spanish. Both
+versions produce identical files and can be mixed (e.g. resume a run started
+with the other one).
+
 ```
 CHARMM-GUI gromacs/
       │
@@ -61,10 +78,12 @@ any system without editing.
 - **Centered trajectory**, **ligand RMSD**, **protein–ligand hydrogen
   bonds**, **RMSF per residue**, **radius of gyration** and **PDB snapshots**
   (start / middle / end).
-- **Any ligand:** the ligand is detected automatically as everything in
-  CHARMM-GUI's `SOLU` group that is not protein.
-- **Microplastics and other C/H-only ligands:** H-bonds are replaced
-  automatically by protein–ligand contacts and minimum distance.
+- **Any ligand:** receptor and ligands are detected automatically from
+  `topol.top`, the same way Free Energy does. Several ligands (e.g. a
+  microplastic plus an endogenous ligand or a cofactor) are analysed
+  **separately**, never mixed; `--ligand` / `--receptor` for special cases.
+- **Ligands with no N or O (e.g. polyethylene, polystyrene, PVC):** H-bonds
+  are replaced automatically by protein–ligand contacts and minimum distance.
 - **Organized output** in `Analyses/`, optionally copied to shared project
   folders with the system name.
 
@@ -114,7 +133,7 @@ cp /path/to/Gromacs_Scripts/*.sh .                  # the three tools
 
 # 1. Simulate — choose ONE of the two options:
 bash Autogromacs.sh                                       # a) interactive: it asks
-                                                          #    "¿Cuántos ns...?" → type 200 (or any length)
+                                                          #    "How many ns...?" → type 200 (or any length)
 nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # b) background: length as argument
 
 # 2. Analyse
@@ -134,8 +153,8 @@ background, so you can close the terminal or log out; follow it with
 `bash Autogromacs.sh` again with no number.
 
 **Requirements:** Linux, GROMACS 2024/2026 with CUDA, an NVIDIA GPU (for the
-simulation; the analyses run on CPU) and a CHARMM-GUI Solution Builder
-`gromacs/` folder. Free Energy also needs a conda environment with
+simulation; the analyses run on CPU), Python 3 and a CHARMM-GUI Solution
+Builder `gromacs/` folder of a soluble (non-membrane) system. Free Energy also needs a conda environment with
 [gmx_MMPBSA](https://valdes-tresanco-ms.github.io/gmx_MMPBSA/) and, for the
 Excel file, `openpyxl`. Details in each tool's documentation.
 

@@ -10,13 +10,30 @@ unión, con un comando por paso.**
 Desarrollado en el Laboratorio de Hormonas y Conducta, Escuela Nacional de
 Ciencias Biológicas, Instituto Politécnico Nacional (ENCB-IPN), México.
 
+Los scripts no dependen de la proteína ni del ligando: sirven para cualquier
+complejo proteína–ligando (oligómeros de microplásticos, fármacos,
+metabolitos, ligandos endógenos...) o proteína sola preparada con CHARMM-GUI.
+
+> **Solo proteínas solubles, sin membranas.** Este repositorio está pensado
+> para sistemas proteína–ligando en agua (CHARMM-GUI **Solution Builder** /
+> **Ligand Reader & Modeler**). Los sistemas con membrana (CHARMM-GUI
+> Membrane Builder: proteínas de membrana, bicapas lipídicas) quedan **fuera
+> de su alcance**: su protocolo de equilibración y sus nombres de archivo son
+> distintos, y los scripts no están hechos para correrlos.
+
+**Idioma de los scripts:** `Autogromacs.es.sh` y
+`basic_analyses_with_names.es.sh` muestran sus mensajes en español;
+`Autogromacs.sh` y `basic_analyses_with_names.sh` son los mismos scripts en
+inglés. Las dos versiones generan archivos idénticos y se pueden combinar
+(p.ej. reanudar una corrida que se empezó con la otra).
+
 ```
 gromacs/ de CHARMM-GUI
       │
       ▼
- Autogromacs.sh ──────────────► dynamic<N>ns.xtc / .tpr
+ Autogromacs.es.sh ──────────────► dynamic<N>ns.xtc / .tpr
  (minimización, equilibración,        │
-  producción)                         ├──► basic_analyses_with_names.sh ──► Analyses/*.xvg, *.pdb
+  producción)                         ├──► basic_analyses_with_names.es.sh ──► Analyses/*.xvg, *.pdb
                                       │    (RMSD, puentes H/contactos, RMSF, Rg, snapshots)
                                       │
                                       └──► free_energy.sh ──► Analyses/FreeEnergy_*/summary.csv
@@ -32,7 +49,7 @@ gromacs/ de CHARMM-GUI
 
 ### 🧬 Autogromacs — correr la simulación
 
-`Autogromacs.sh` corre todo el flujo de dinámica molecular (minimización →
+`Autogromacs.es.sh` corre todo el flujo de dinámica molecular (minimización →
 equilibración → producción) en una GPU NVIDIA, por el tiempo que le pidas.
 
 - **Un solo archivo, nada que editar:** cópialo a la carpeta `gromacs/` de
@@ -48,31 +65,34 @@ equilibración → producción) en una GPU NVIDIA, por el tiempo que le pidas.
   GROMACS 2024 y 2026.
 
 ```bash
-bash Autogromacs.sh                                       # pregunta cuántos ns → teclea 200
-nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # o dalos directo, en segundo plano
+bash Autogromacs.es.sh                                       # pregunta cuántos ns → teclea 200
+nohup bash Autogromacs.es.sh 200 > autogromacs.log 2>&1 &   # o dalos directo, en segundo plano
 ```
 
 📖 **[Documentación completa de Autogromacs →](docs/Autogromacs.es.md)**
 
 ### 📊 Basic Analyses — analizar la trayectoria
 
-`basic_analyses_with_names.sh` hace los análisis estándar posteriores a la
+`basic_analyses_with_names.es.sh` hace los análisis estándar posteriores a la
 producción, eligiendo los grupos de GROMACS **por nombre**, así que funciona
 en cualquier sistema sin editar nada.
 
 - **Trayectoria centrada**, **RMSD del ligando**, **puentes de hidrógeno
   proteína–ligando**, **RMSF por residuo**, **radio de giro** y **snapshots
   PDB** (inicio / mitad / final).
-- **Cualquier ligando:** se detecta solo, como todo lo que hay en el grupo
-  `SOLU` de CHARMM-GUI que no es proteína.
-- **Microplásticos y otros ligandos de solo C/H:** los puentes de H se
+- **Cualquier ligando:** el receptor y los ligandos se detectan solos a
+  partir de `topol.top`, igual que en Free Energy. Si hay varios ligandos
+  (p. ej. un microplástico más un ligando endógeno o un cofactor), se
+  analizan **por separado**, nunca mezclados; `--ligand` / `--receptor` para
+  casos especiales.
+- **Ligandos sin N ni O (p.ej. polietileno, poliestireno, PVC):** los puentes de H se
   sustituyen automáticamente por contactos y distancia mínima
   proteína–ligando.
 - **Salida ordenada** en `Analyses/` y, si existen, copias en las carpetas
   compartidas del proyecto con el nombre del sistema.
 
 ```bash
-bash basic_analyses_with_names.sh
+bash basic_analyses_with_names.es.sh
 ```
 
 📖 **[Documentación completa de Basic Analyses →](docs/basic_analyses.es.md)**
@@ -117,12 +137,12 @@ cd /ruta/a/mi_sistema/gromacs            # salida de CHARMM-GUI Solution Builder
 cp /ruta/a/Gromacs_Scripts/*.sh .         # las tres herramientas
 
 # 1. Simular — elige UNA de las dos opciones:
-bash Autogromacs.sh                                       # a) interactivo: pregunta
+bash Autogromacs.es.sh                                       # a) interactivo: pregunta
                                                           #    "¿Cuántos ns...?" → teclea 200 (o los que quieras)
-nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &   # b) en segundo plano: los ns como argumento
+nohup bash Autogromacs.es.sh 200 > autogromacs.log 2>&1 &   # b) en segundo plano: los ns como argumento
 
 # 2. Analizar
-bash basic_analyses_with_names.sh
+bash basic_analyses_with_names.es.sh
 
 # 3. Energética de unión
 bash free_energy.sh
@@ -135,11 +155,12 @@ La opción **a** es la más sencilla: corres el script y tecleas los ns cuando
 te los pida. Deja la terminal abierta hasta que termine. La opción **b**
 corre en segundo plano, así que puedes cerrar la terminal o la sesión; el
 avance se sigue con `tail -f autogromacs.log`. Para reanudar después de una
-interrupción, vuelve a correr `bash Autogromacs.sh` sin número.
+interrupción, vuelve a correr `bash Autogromacs.es.sh` sin número.
 
 **Requisitos:** Linux, GROMACS 2024/2026 con CUDA, una GPU NVIDIA (para la
-simulación; los análisis corren en CPU) y una carpeta `gromacs/` de
-CHARMM-GUI Solution Builder. Free Energy necesita además un ambiente de conda
+simulación; los análisis corren en CPU), Python 3 y una carpeta `gromacs/`
+de CHARMM-GUI Solution Builder de un sistema soluble (sin membrana). Free
+Energy necesita además un ambiente de conda
 con [gmx_MMPBSA](https://valdes-tresanco-ms.github.io/gmx_MMPBSA/) y, para el
 Excel, `openpyxl`. Los detalles están en la documentación de cada
 herramienta.

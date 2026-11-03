@@ -1,6 +1,7 @@
 #!/bin/bash
 ###############################################################################
 # basic_analyses_with_names.sh — standard post-processing for Autogromacs trajectories
+#                                (Spanish version: basic_analyses_with_names.es.sh)
 #
 # Author : Ricardo Aguilar-Garay
 # Contact: ricardoaguilargaray@gmail.com
@@ -16,25 +17,56 @@
 #       bash basic_analyses_with_names.sh               (auto-detects dynamic<N>ns.*)
 #       bash basic_analyses_with_names.sh dynamic150ns  (or name the basename explicitly)
 #
-# Same analyses as the original lab script, but using GROMACS default groups
-# BY NAME instead of by number (the numbers shift between systems):
-#   1. Centered trajectory     center Protein, write System      (old: 1 0)
-#   2. RMSD of the ligand      fit Backbone, calc Ligand          (old: 4 13)
-#   3. H-bonds                 Protein – Ligand                   (old: 1 13)
-#      (ligands with only C/H, e.g. microplastics: Protein–Ligand contacts)
-#   4. RMSF per residue        Protein                            (old: 1)
-#   5. Radius of gyration      Protein                            (old: 1)
-#   6. PDB snapshots           System at start / middle / end     (old: 0)
+# Options (only for special cases; by default everything is detected):
+#       --ligand NAME[,NAME]    analyse only these molecules (from [ molecules ]
+#                               in topol.top) as ligands, e.g. to leave out a
+#                               cofactor, or to treat a peptide chain as ligand
+#       --receptor NAME[,NAME]  receptor molecule(s) (default: all protein chains)
 #
-# "Ligand" = everything in the CHARMM-GUI SOLU group that is not Protein,
-# so it works for any ligand name. If there is no ligand, RMSD is computed
-# on the Backbone and H-bonds within the Protein.
+# Works for any protein and any ligand (microplastic, drug, metabolite...).
+# GROMACS groups are selected BY NAME, never by number (the numbers shift
+# between systems), so nothing has to be edited:
+#   1. Centered trajectory     center Receptor, write System
+#   2. RMSD of each ligand     fit receptor backbone, calc ligand
+#   3. H-bonds                 Receptor – each ligand
+#      (ligands with no N or O atoms, e.g. polyethylene, polystyrene, PVC,
+#       PTFE: Receptor–ligand contacts and minimum distance instead)
+#   4. RMSF per residue        Receptor
+#   5. Radius of gyration      Receptor
+#   6. PDB snapshots           System at start / middle / end
 #
-# Results go to Analyses/ and, if the folders ../../rmsd, ../../hbond,
-# ../../rmsf, ../../gyrate and ../../conformation exist, are copied there
-# too, as the original script did (renamed with the system name).
+# Receptor and ligands are read from the [ molecules ] section of topol.top:
+# proteins = receptor; water and ions are ignored; molecules with more than 5
+# copies (lipids, cosolvents) are ignored; every other molecule type is a
+# ligand. Each ligand gets its own group (Ligand_<name>) and its own results,
+# so a microplastic, an endogenous ligand and a cofactor are never mixed.
+# Copies of the same molecule go into one group. With one ligand the output
+# names are rmsd_<folder>_<N>ns.xvg; with several, the ligand name is added:
+# rmsd_<folder>_<ligand>_<N>ns.xvg. If there is no ligand, RMSD is computed
+# on the receptor backbone and H-bonds within the receptor.
+#
+# Results go to Analyses/. Optionally, if the folders ../../rmsd, ../../hbond,
+# ../../contacts, ../../rmsf, ../../gyrate and ../../conformation exist (a
+# project folder that gathers many systems), they are copied there too,
+# renamed with the system name.
 ###############################################################################
 set -uo pipefail
+
+# ── Arguments ───────────────────────────────────────────────────────────────
+BASE=""; LIGAND_OPT=""; RECEPTOR_OPT=""
+usage(){ awk 'NR>=3 && /^####/{exit} NR>=3' "$0" | sed 's/^# \{0,1\}//'; }
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ligand|--receptor)
+            [[ -n "${2:-}" ]] || { echo "❌ ERROR: $1 needs a value (see --help)."; exit 1; }
+            [[ "$1" == "--ligand" ]] && LIGAND_OPT="$2" || RECEPTOR_OPT="$2"
+            shift ;;
+        -h|--help) usage; exit 0 ;;
+        -*)        echo "❌ ERROR: unknown option '$1' (see --help)."; exit 1 ;;
+        *)         BASE="$1" ;;
+    esac
+    shift
+done
 
 # ── Locate GROMACS: gmx (thread-MPI build) or gmx_mpi (real MPI build) ──────
 find_gmx(){ command -v gmx >/dev/null 2>&1 && echo gmx && return
@@ -49,6 +81,8 @@ if [[ -z "$GMX" ]]; then
 fi
 [[ -z "$GMX" ]] && { echo "❌ ERROR: neither 'gmx' nor 'gmx_mpi' found."; exit 1; }
 echo "✓ GROMACS: $(command -v "$GMX")"
+PYTHON=$(command -v python3 || command -v python || true)
+[[ -n "$PYTHON" ]] || { echo "❌ ERROR: python3 not found (needed to read topol.top)."; exit 1; }
 
 # ── Names: files in Analyses/ are tagged with the current folder name
 #    (e.g. rmsd_gromacs_200ns.xvg); copies to the shared folders use the
@@ -58,7 +92,7 @@ SYS="$NAME"
 [[ "$NAME" == "gromacs" ]] && SYS="$(basename "$(dirname "$PWD")")"
 
 # ── Detect trajectory: argument > newest dynamic<N>ns.* > step5_production ──
-BASE="${1:-}"; TPR=""; XTC=""
+TPR=""; XTC=""
 if [[ -n "$BASE" ]]; then
     TPR="${BASE}.tpr"; XTC="${BASE}.xtc"
 else
@@ -74,7 +108,7 @@ if [[ -z "$TPR" || ! -f "$TPR" || ! -f "$XTC" ]]; then
     echo "❌ ERROR: no trajectory found (dynamic<N>ns.{tpr,xtc} or step5_production.*)."
     exit 1
 fi
-[[ -f index.ndx ]] || { echo "❌ ERROR: index.ndx not found. Run inside gromacs/."; exit 1; }
+[[ -f topol.top ]] || { echo "❌ ERROR: topol.top not found. Run inside gromacs/."; exit 1; }
 
 # ── Simulation length (for file labels and snapshot spacing) ────────────────
 if [[ "$BASE" =~ dynamic([0-9]+)ns ]]; then
@@ -90,67 +124,221 @@ NDX="${OUT}/index_analysis.ndx"
 CENTERED="${OUT}/${BASE}_centered.xtc"
 echo "═══ ${SYS} · ${XTC} · ${TOTAL_NS} ns → ${OUT}/ ═══"
 
-# ── 0. Index: GROMACS default groups + SOLU + Ligand (= SOLU & !Protein) ────
+# ── 0. Index: GROMACS default groups + Receptor, Receptor_BB, Ligand_<name> ──
+# The helper reads [ molecules ] from topol.top (following #include), appends
+# the groups to the index and prints KEY='value' lines (evaluated below).
 echo q | "$GMX" make_ndx -f "$TPR" -o "$NDX" >/dev/null 2>&1
-awk '/^\[/{p = ($0 ~ /^\[ *SOLU *\]/)} p' index.ndx >> "$NDX"
-NG=$(grep -c '^\[' "$NDX")              # the new group will get number NG
-printf '"SOLU" & ! "Protein"\nname %d Ligand\nq\n' "$NG" \
-    | "$GMX" make_ndx -f "$TPR" -n "$NDX" -o "${OUT}/tmp_index.ndx" >/dev/null 2>&1
-mv -f "${OUT}/tmp_index.ndx" "$NDX" 2>/dev/null
+[[ -s "$NDX" ]] || { echo "❌ ERROR: gmx make_ndx could not read ${TPR}."; exit 1; }
+DETECT=$("$PYTHON" - "$LIGAND_OPT" "$RECEPTOR_OPT" "$NDX" <<'PYDETECT'
+import os, re, sys
+lig_opt = [x.strip() for x in sys.argv[1].split(",") if x.strip()]
+rec_opt = [x.strip() for x in sys.argv[2].split(",") if x.strip()]
+ndx_out = sys.argv[3]
 
-if grep -q '^\[ Ligand \]' "$NDX"; then
-    LIG="Ligand"; echo "✓ Ligand group created (SOLU minus Protein)."
-else
-    LIG=""; echo "✓ No ligand in SOLU: RMSD on Backbone, H-bonds within Protein."
+WATER = {"TIP3","SOL","TIP4","TIP4P","TIP5P","SPC","SPCE","WAT","HOH","TP3","T3P","SWM4","TIP3P"}
+IONS  = {"POT","CLA","SOD","MG","CAL","ZN2","ZN","CES","LIT","RUB","BAR","CD2","NA","CL","K",
+         "CA","LI","CS","RB","FE2","FE3","MN","CU","CU2","NI","CO","IOD","BR","F","FLU"}
+AA = {"ALA","ARG","ASN","ASP","CYS","GLN","GLU","GLY","HIS","HSD","HSE","HSP","HID","HIE","HIP",
+      "ILE","LEU","LYS","MET","PHE","PRO","SER","THR","TRP","TYR","VAL","CYX","CYM","ASH","GLH",
+      "LYN","ARN","SEP","TPO","PTR","NLE","MSE","ACE","NME","NMA","CT3"}
+
+def q(s): return "'" + str(s).replace("'", "'\\''") + "'"
+def fail(msg):
+    print("FAIL=" + q(msg)); sys.exit(0)
+
+moltypes, molecules = {}, []
+def parse(path, seen=None):
+    seen = seen if seen is not None else set()
+    path = os.path.normpath(path)
+    if path in seen or not os.path.isfile(path): return
+    seen.add(path)
+    base, section, cur = os.path.dirname(path), None, None
+    for raw in open(path, errors="replace"):
+        line = raw.split(";")[0].strip()
+        if not line: continue
+        if line.startswith("#include"):
+            m = re.search(r'["<](.+?)[">]', line)
+            if m:
+                cand = os.path.join(base, m.group(1))
+                parse(cand if os.path.isfile(cand) else m.group(1), seen)
+            continue
+        if line.startswith("#"): continue
+        m = re.match(r"\[\s*(\w+)\s*\]", line)
+        if m: section = m.group(1).lower(); continue
+        f = line.split()
+        if section == "moleculetype":
+            cur = f[0]; moltypes[cur] = []; section = "moleculetype_done"
+        elif section == "atoms" and cur is not None and len(f) >= 5:
+            try: charge = float(f[6]) if len(f) > 6 else 0.0
+            except ValueError: charge = 0.0
+            moltypes[cur].append((f[3], f[4], charge, f[2]))    # resname, atom, charge, resnr
+        elif section == "molecules" and len(f) >= 2:
+            try: molecules.append((f[0], int(f[1])))
+            except ValueError: pass
+
+parse("topol.top")
+if not molecules: fail("could not read the [ molecules ] section of topol.top")
+missing = [n for n, _ in molecules if n not in moltypes]
+if missing: fail("moleculetype(s) not found in the included .itp files: " + ", ".join(missing))
+
+def kind(name):
+    atoms = moltypes[name]; resn = [a[0].upper() for a in atoms]
+    if name.upper() in WATER or set(resn) <= WATER: return "water"
+    if name.upper() in IONS or (len(atoms) == 1 and abs(sum(a[2] for a in atoms)) > 0.5): return "ion"
+    if re.match(r"^PRO[A-Z]$", name) or (resn and sum(r in AA for r in resn) / len(resn) > 0.5): return "protein"
+    return "other"
+
+# Global atom ranges in topology order (1-based)
+blocks, start = [], 1
+for name, count in molecules:
+    n = len(moltypes[name])
+    blocks.append(dict(name=name, count=count, natoms=n, start=start, kind=kind(name)))
+    start += n * count
+
+def match(blk, names):
+    up = [x.upper() for x in names]
+    return blk["name"].upper() in up or any(a[0].upper() in up for a in moltypes[blk["name"]])
+
+notes = []
+if lig_opt:
+    lig = [b for b in blocks if match(b, lig_opt)]
+    if not lig: fail("--ligand %s does not match any molecule in topol.top. Molecules: %s"
+                     % (",".join(lig_opt), ", ".join(b["name"] for b in blocks)))
+else:
+    cands = [b for b in blocks if b["kind"] == "other"]
+    lig = [b for b in cands if b["count"] <= 5]
+    bulk = [b for b in cands if b["count"] > 5]
+    if bulk:
+        notes.append("molecules with >5 copies are not analysed as ligands (use --ligand to include them): "
+                     + ", ".join("%s(x%d)" % (b["name"], b["count"]) for b in bulk))
+
+lig_ids = {id(b) for b in lig}
+if rec_opt:
+    rec = [b for b in blocks if match(b, rec_opt) and id(b) not in lig_ids]
+    if not rec: fail("--receptor %s does not match any molecule (or it is the ligand)." % ",".join(rec_opt))
+else:
+    rec = [b for b in blocks if b["kind"] == "protein" and id(b) not in lig_ids]
+    if not rec: fail("no protein found to use as receptor. Use --receptor NAME.")
+rec_ids = {id(b) for b in rec}
+ignored = [b for b in blocks if id(b) not in lig_ids | rec_ids]
+
+def indices(blks, pick=lambda a: True):
+    out = []
+    for b in blks:
+        atoms = moltypes[b["name"]]
+        for c in range(b["count"]):
+            off = b["start"] + c * b["natoms"]
+            out += [off + i for i, a in enumerate(atoms) if pick(a)]
+    return out
+
+def group(name, idx):
+    s = "[ %s ]\n" % name
+    for i in range(0, len(idx), 15): s += " ".join("%6d" % x for x in idx[i:i+15]) + "\n"
+    return s
+
+rec_idx = indices(rec)
+bb_idx  = indices(rec, lambda a: a[1].upper() in ("N", "CA", "C"))
+if not bb_idx: bb_idx = indices(rec, lambda a: not a[1].upper().startswith("H"))
+groups = [("Receptor", rec_idx), ("Receptor_BB", bb_idx)]
+
+# One group per ligand molecule type (all its copies together)
+ligs, used = [], set()
+for b in lig:
+    known = next((L for L in ligs if L["name"] == b["name"]), None)
+    if known: known["blocks"].append(b); continue
+    tag = re.sub(r"[^A-Za-z0-9]+", "_", b["name"]).strip("_") or "LIG"
+    while tag.upper() in used: tag += "_"
+    used.add(tag.upper())
+    ligs.append(dict(name=b["name"], tag=tag, blocks=[b]))
+for L in ligs:
+    idx = indices(L["blocks"])
+    copies = sum(b["count"] for b in L["blocks"])
+    polar = any(a[1].upper()[:1] in ("N", "O") for b in L["blocks"] for a in moltypes[b["name"]])
+    L.update(copies=copies, natoms=len(idx) // copies, polar=polar)
+    groups.append(("Ligand_" + L["tag"], idx))
+    if copies > 1: notes.append("ligand %s has %d copies: analysed together" % (L["name"], copies))
+
+with open(ndx_out, "a") as fh:
+    for name, idx in groups: fh.write(group(name, idx))
+
+def show(b): return b["name"] + ("(x%d)" % b["count"] if b["count"] > 1 else "")
+nres = sum(len({a[3] for a in moltypes[b["name"]]}) * b["count"] for b in rec)
+print("REC_SHOW=" + q("%s (%d residues)" % (", ".join(show(b) for b in rec), nres)))
+print("LIG_SHOW=" + q(" · ".join("%s%s (%d atoms%s)" % (L["name"], "(x%d)" % L["copies"] if L["copies"] > 1 else "",
+                                L["natoms"], "" if L["polar"] else ", no N/O → contacts") for L in ligs)))
+print("IGN_SHOW=" + q(", ".join(show(b) for b in ignored)))
+print("LIGS=" + q(" ".join("%s:%d" % (L["tag"], L["polar"]) for L in ligs)))
+print("NOTES=" + q(" | ".join(notes)))
+PYDETECT
+)
+if [[ "$DETECT" != *"LIGS="* && "$DETECT" != *"FAIL="* ]]; then
+    echo "❌ ERROR: could not read topol.top (python helper failed)."; exit 1
 fi
+FAIL=""; eval "$DETECT"
+[[ -n "$FAIL" ]] && { echo "❌ ERROR: ${FAIL}"; exit 1; }
 
-# ── 1. Centered trajectory: center Protein, write System ────────────────────
+read -ra LIG_LIST <<< "$LIGS"
+NLIG=${#LIG_LIST[@]}
+echo " Receptor : ${REC_SHOW}"
+echo " Ligands  : ${LIG_SHOW:-none (apo): RMSD on the receptor backbone, H-bonds within the receptor}"
+[[ -n "$IGN_SHOW" ]] && echo " Ignored  : ${IGN_SHOW}"
+[[ -n "$NOTES" ]] && echo " ℹ ${NOTES}"
+
+# Output name of an analysis: the ligand name is added only if there are several
+out(){ # $1 = analysis, $2 = ligand tag (may be empty)
+    if (( NLIG > 1 )); then echo "${OUT}/${1}_${NAME}_${2}_${LABEL}.xvg"
+    else echo "${OUT}/${1}_${NAME}_${LABEL}.xvg"; fi
+}
+
+# ── 1. Centered trajectory: center Receptor, write System ───────────────────
 if [[ ! -f "$CENTERED" ]]; then
-    printf "Protein\nSystem\n" | "$GMX" trjconv -s "$TPR" -f "$XTC" -n "$NDX" \
+    printf "Receptor\nSystem\n" | "$GMX" trjconv -s "$TPR" -f "$XTC" -n "$NDX" \
         -o "$CENTERED" -pbc mol -center || exit 1
 fi
 
-# ── 2. RMSD: fit Backbone, calc Ligand (Backbone if no ligand) ──────────────
-printf "Backbone\n%s\n" "${LIG:-Backbone}" | "$GMX" rms -s "$TPR" -f "$CENTERED" \
-    -n "$NDX" -o "${OUT}/rmsd_${NAME}_${LABEL}.xvg" -tu ns || exit 1
+# ── 2-3. Per ligand: RMSD, then H-bonds or contacts ─────────────────────────
+# gmx hbond only uses N and O as donors/acceptors. Ligands with no N or O
+# atoms (polyethylene, polypropylene, polystyrene, PVC, PTFE...) have none,
+# and gmx hbond refuses to run. For those, Receptor–ligand contacts (atom
+# pairs < 0.4 nm) and the minimum distance are computed instead.
+hbonds(){ # $1 = second group, $2 = output (new -r/-t syntax, legacy fallback)
+    "$GMX" hbond -f "$CENTERED" -s "$TPR" -n "$NDX" -num "$2" -tu ns \
+        -r Receptor -t "$1" 2>/dev/null \
+    || printf "Receptor\n%s\n" "$1" | "$GMX" hbond -f "$CENTERED" \
+        -s "$TPR" -n "$NDX" -num "$2" -tu ns \
+    || echo "⚠ H-bond analysis failed ($1); continuing with the rest."
+}
+contacts(){ # $1 = ligand group, $2 = ligand tag
+    printf "Receptor\n%s\n" "$1" | "$GMX" mindist -s "$TPR" -f "$CENTERED" -n "$NDX" \
+        -d 0.4 -tu ns -on "$(out contacts "$2")" -od "$(out mindist "$2")" \
+    || echo "⚠ Contact analysis failed ($1); continuing with the rest."
+}
 
-# ── 3. H-bonds Protein–Ligand (new -r/-t syntax, legacy fallback) ───────────
-# Ligands made only of C and H (polyethylene, polypropylene, polystyrene...)
-# have no H-bond donors/acceptors and gmx hbond refuses to run. For those,
-# Protein–Ligand contacts (atom pairs < 0.4 nm) are computed instead.
-POLAR=1
-if [[ -n "$LIG" ]]; then
-    "$GMX" editconf -f "$TPR" -o "${OUT}/.ref.gro" >/dev/null 2>&1
-    POLAR=$(awk 'FNR==NR{ if(/^\[/){g=($0 ~ /^\[ *Ligand *\]/); next}
-                          if(g) for(i=1;i<=NF;i++) L[$i]=1; next }
-                 FNR>2 && ((FNR-2) in L){ a=substr($0,11,5); gsub(/ /,"",a)
-                          if(a ~ /^[NOSF]/) n++ }
-                 END{print n+0}' "$NDX" "${OUT}/.ref.gro")
-    rm -f "${OUT}/.ref.gro"
+if (( NLIG == 0 )); then
+    printf "Receptor_BB\nReceptor_BB\n" | "$GMX" rms -s "$TPR" -f "$CENTERED" \
+        -n "$NDX" -o "$(out rmsd "")" -tu ns || exit 1
+    hbonds Receptor "$(out hbond "")"
 fi
+for entry in "${LIG_LIST[@]}"; do
+    tag="${entry%:*}"; polar="${entry##*:}"; grp="Ligand_${tag}"
+    (( NLIG > 1 )) && echo "── Ligand ${tag} ──"
+    printf "Receptor_BB\n%s\n" "$grp" | "$GMX" rms -s "$TPR" -f "$CENTERED" \
+        -n "$NDX" -o "$(out rmsd "$tag")" -tu ns || exit 1
+    if (( polar )); then
+        hbonds "$grp" "$(out hbond "$tag")"
+    else
+        echo "✓ ${tag} has no N or O atoms (e.g. polyolefin microplastic): H-bonds skipped,"
+        echo "  computing Receptor–ligand contacts (< 0.4 nm) instead."
+        contacts "$grp" "$tag"
+    fi
+done
 
-if (( POLAR > 0 )); then
-    HB="${OUT}/hbond_${NAME}_${LABEL}.xvg"
-    "$GMX" hbond -f "$CENTERED" -s "$TPR" -n "$NDX" -num "$HB" -tu ns \
-        -r Protein -t "${LIG:-Protein}" 2>/dev/null \
-    || printf "Protein\n%s\n" "${LIG:-Protein}" | "$GMX" hbond -f "$CENTERED" \
-        -s "$TPR" -n "$NDX" -num "$HB" -tu ns \
-    || echo "⚠ H-bond analysis failed; continuing with the rest."
-else
-    echo "✓ Ligand has no N/O/S/F atoms (e.g. microplastic): H-bonds skipped,"
-    echo "  computing Protein–Ligand contacts (< 0.4 nm) instead."
-    printf "Protein\nLigand\n" | "$GMX" mindist -s "$TPR" -f "$CENTERED" -n "$NDX" \
-        -d 0.4 -tu ns -on "${OUT}/contacts_${NAME}_${LABEL}.xvg" \
-        -od "${OUT}/mindist_${NAME}_${LABEL}.xvg" \
-    || echo "⚠ Contact analysis failed; continuing with the rest."
-fi
-
-# ── 4. RMSF per residue (Protein) ───────────────────────────────────────────
-printf "Protein\n" | "$GMX" rmsf -s "$TPR" -f "$CENTERED" -n "$NDX" \
+# ── 4. RMSF per residue (Receptor) ──────────────────────────────────────────
+printf "Receptor\n" | "$GMX" rmsf -s "$TPR" -f "$CENTERED" -n "$NDX" \
     -o "${OUT}/rmsf_${NAME}_${LABEL}.xvg" -res || exit 1
 
-# ── 5. Radius of gyration (Protein) ─────────────────────────────────────────
-printf "Protein\n" | "$GMX" gyrate -s "$TPR" -f "$CENTERED" -n "$NDX" \
+# ── 5. Radius of gyration (Receptor) ────────────────────────────────────────
+printf "Receptor\n" | "$GMX" gyrate -s "$TPR" -f "$CENTERED" -n "$NDX" \
     -o "${OUT}/gyrate_${NAME}_${LABEL}.xvg" || exit 1
 
 # ── 6. PDB snapshots at t = 0, middle and end (System) ──────────────────────
@@ -158,14 +346,16 @@ SNAP_DT=$(( TOTAL_NS * 500 )); (( SNAP_DT < 1 )) && SNAP_DT=1
 printf "System\n" | "$GMX" trjconv -s "$TPR" -f "$CENTERED" -n "$NDX" \
     -dt "$SNAP_DT" -o "${OUT}/trj_${NAME}_${LABEL}.pdb" -pbc mol || exit 1
 
-# ── Copy results to the shared folders, as the original script did ─────────
+# ── Optional: copy results to the shared project folders, if they exist ─────
 for pair in rmsd:rmsd hbond:hbond contacts:contacts mindist:contacts \
             rmsf:rmsf gyrate:gyrate trj:conformation; do
     src="${pair%%:*}"; dst="../../${pair##*:}"
     [[ -d "$dst" ]] || continue
-    for f in "${OUT}/${src}_${NAME}_${LABEL}".*; do
+    for f in "${OUT}/${src}_${NAME}_"*; do
         [[ -f "$f" ]] || continue
-        cp "$f" "$dst/${src}_${SYS}_${LABEL}.${f##*.}"
+        rest="${f##*/}"; rest="${rest#"${src}_${NAME}_"}"     # [<ligand>_]<N>ns.<ext>
+        [[ "$rest" == "${LABEL}."* || "$rest" == *"_${LABEL}."* ]] || continue
+        cp "$f" "$dst/${src}_${SYS}_${rest}"
     done
 done
 

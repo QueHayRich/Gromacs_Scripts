@@ -12,8 +12,8 @@ CHARMM-GUI systems on NVIDIA GPUs.**
 `Autogromacs.sh` is a single self-contained Bash script. You copy it into a
 freshly downloaded CHARMM-GUI `gromacs/` folder and it runs the whole
 workflow (energy minimization → equilibration → production MD) for any
-simulation length you ask for. It runs unchanged on any lab machine and
-recovers automatically from crashes, power failures and GPU errors.
+simulation length you ask for. It runs unchanged on any machine and with any
+protein–ligand system, and recovers automatically from crashes, power failures and GPU errors.
 
 ---
 
@@ -304,7 +304,7 @@ ways:
    the lines written in the current attempt are checked, so an old message
    from a previous run cannot cause a false alarm.
 
-In either case it prints `⏹ mdrun interrumpido por señal` and exits with
+In either case it prints `⏹ mdrun interrupted by a signal` and exits with
 code **130**. Run the script again to continue.
 
 **GPU telemetry.** During production, `nvidia-smi dmon -s puct -d 10`
@@ -336,12 +336,12 @@ target.
 
 | Message | Meaning |
 |---|---|
-| `🔄 Reanudación detectada: objetivo guardado = N ns` | Resume: the target was read from the state file. |
-| `✓ Minimización ya hecha, se omite.` | Stage skipped because its output exists. |
-| `⚠ El modo HARD falló ... Reintentando en MODO SAFE` | GPU failure; automatic retry in stable mode. |
-| `⏹ mdrun interrumpido por señal` | Ctrl-C / kill / shutdown; checkpoint saved. |
-| `⚠ Ya existe dynamic<N>ns.xtc` | Run already finished; nothing is done. |
-| `❌ mdrun falló incluso en modo estable` | Both modes failed; check the log. |
+| `🔄 Resume detected: saved target = N ns` | Resume: the target was read from the state file. |
+| `✓ Minimization already done, skipped.` | Stage skipped because its output exists. |
+| `⚠ HARD mode failed ... Retrying in SAFE MODE` | GPU failure; automatic retry in stable mode. |
+| `⏹ mdrun interrupted by a signal` | Ctrl-C / kill / shutdown; checkpoint saved. |
+| `⚠ dynamic<N>ns.xtc already exists` | Run already finished; nothing is done. |
+| `❌ mdrun failed even in stable mode` | Both modes failed; check the log. |
 
 | Exit code | Meaning |
 |---|---|
@@ -351,17 +351,17 @@ target.
 
 ## 11. Troubleshooting
 
-**`no encuentro 'gmx'`** — GROMACS is not in the `PATH` or in a standard
+**`'gmx' not found`** — GROMACS is not in the `PATH` or in a standard
 location. Run `source /path/to/gromacs/bin/GMXRC` before the script, or add
 it to `~/.bashrc`.
 
-**`este pipeline requiere GPU NVIDIA`** — `nvidia-smi` does not work. Check
+**`this pipeline requires an NVIDIA GPU`** — `nvidia-smi` does not work. Check
 the driver (`nvidia-smi` in a terminal) and reboot if it was just updated.
 
-**`falta 'step5_production.mdp'` (or `topol.top`, `index.ndx`)** — you are not
+**`'step5_production.mdp' is missing` (or `topol.top`, `index.ndx`)** — you are not
 inside the CHARMM-GUI `gromacs/` folder.
 
-**`Sin terminal interactiva y sin objetivo previo`** — under `nohup` the first
+**`No interactive terminal and no previous target`** — under `nohup` the first
 run needs the length as an argument: `nohup bash Autogromacs.sh 200 ...`.
 
 **Fails in SAFE mode too** — look in `step5_production.log` for
@@ -399,9 +399,10 @@ extending the `.tpr` is negligible.
 
 ## 13. Limitations
 
-- Only CHARMM-GUI **Solution Builder** naming (`step4.0`, `step4.1`,
-  `step5`). Membrane Builder systems (`step6.x` / `step7`) are not yet
-  supported.
+- **Soluble systems only.** Only CHARMM-GUI **Solution Builder** naming
+  (`step4.0`, `step4.1`, `step5`). Membrane systems (Membrane Builder,
+  `step6.x` / `step7`) are out of the scope of this repository and are not
+  run.
 - An NVIDIA GPU is required; there is no CPU-only mode.
 - Single GPU per run (`-ntmpi 1`).
 

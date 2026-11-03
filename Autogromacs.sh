@@ -1,45 +1,50 @@
 #!/bin/bash
 ###############################################################################
-# Autogromacs.sh — pipeline GROMACS automático con duración ADAPTABLE (v2)
+# Autogromacs.sh — automated GROMACS pipeline with ADAPTABLE length (v2)
+#                  (Spanish version: Autogromacs.es.sh)
 #
-# Copia este ÚNICO archivo a cualquier carpeta gromacs/ de CHARMM-GUI y ejecuta:
-#       bash Autogromacs.sh            (pregunta los ns la primera vez)
-#       bash Autogromacs.sh 200        (o pásalos como argumento; útil con nohup)
+# Author : Ricardo Aguilar-Garay
+# Contact: ricardoaguilargaray@gmail.com
+#          (questions, bug reports, and suggestions are welcome)
 #
-# Corre TODO el flujo: minimización -> equilibración -> producción.
+# Contributor: Dulce Estefanía Nicolás Álvarez
+#              Departamento de Fisiología, Escuela Nacional de Ciencias
+#              Biológicas, Instituto Politécnico Nacional (ENCB-IPN), Mexico
+#              dnicolas@ipn.mx
 #
-# La PRODUCCIÓN se hace en TRAMOS de 100 ns: corre 100 ns, luego extiende
-# +100 ns (convert-tpr -extend + mdrun -cpi -append, método validado en
-# Gelsolina) hasta completar el total. Con -append todo queda en UN SOLO
-# archivo continuo, sin frames duplicados.
+# Works for any protein–ligand (or apo protein) system prepared with
+# CHARMM-GUI: nothing in the script depends on the protein or the ligand.
 #
-# REANUDABLE: si la corrida se corta, vuelve a ejecutar el script (sin
-# argumentos) y continúa desde el último checkpoint. El objetivo total se
-# recuerda en un archivo de estado: NO hace falta volver a teclearlo.
+# Copy this SINGLE file into any CHARMM-GUI gromacs/ folder and run:
+#       bash Autogromacs.sh            (asks for the ns the first time)
+#       bash Autogromacs.sh 200        (or give them as an argument; handy with nohup)
 #
-# UNIVERSAL: detecta gmx (PATH o GMXRC), detecta si hay GPU NVIDIA y ajusta
-# los flags de mdrun; usa todos los núcleos disponibles (nproc). Si el modo
-# GPU agresivo falla (p.ej. CUDA error #700), reintenta automáticamente en
-# modo estable (bonded/update en CPU) desde el último checkpoint.
-# Compatible con GROMACS 2024 y 2026: -append solo se usa si ya hay .cpt
-# (2026 aborta con -append sin checkpoint) y se desactivan funciones
-# experimentales (CUDA graphs) aunque estén activas en el entorno.
+# Runs the WHOLE workflow: minimization -> equilibration -> production.
 #
-# Al terminar deja la trayectoria con nombre adaptable:
-#       dynamic<N>ns.{xtc,tpr,edr,log,gro,cpt}      (p.ej. dynamic200ns.xtc)
+# PRODUCTION runs in SEGMENTS of 100 ns: it runs 100 ns, then extends
+# +100 ns (convert-tpr -extend + mdrun -cpi -append) until the total is
+# reached. With -append everything ends up in ONE continuous file, with no
+# duplicated frames.
 #
-# Proyecto: Maydelis Viltres-Acosta — MPs <-> Daphnia magna
+# RESUMABLE: if the run is interrupted, run the script again (with no
+# arguments) and it continues from the last checkpoint. The total target is
+# remembered in a state file: there is NO need to type it again.
 #
-# Autor        : Ricardo Aguilar-Garay (ricardoaguilargaray@gmail.com)
-# Contribuidora: Dulce Estefanía Nicolás Álvarez (dnicolas@ipn.mx)
-#                Departamento de Fisiología, Escuela Nacional de Ciencias
-#                Biológicas, Instituto Politécnico Nacional (ENCB-IPN)
+# UNIVERSAL: finds gmx (PATH or GMXRC), checks for an NVIDIA GPU and sets the
+# mdrun flags; uses all available cores (nproc). If the aggressive GPU mode
+# fails (e.g. CUDA error #700), it retries automatically in a stable mode
+# (bonded/update on CPU) from the last checkpoint.
+# Compatible with GROMACS 2024 and 2026: -append is only used when a .cpt
+# exists (2026 aborts with -append and no checkpoint) and experimental
+# features (CUDA graphs) are disabled even if set in the environment.
+#
+# When finished, the trajectory gets a length-based name:
+#       dynamic<N>ns.{xtc,tpr,edr,log,gro,cpt}      (e.g. dynamic200ns.xtc)
 ###############################################################################
 set -uo pipefail
 
-# ── 0a. Localizar GROMACS ───────────────────────────────────────────────────
-# Primero el PATH; si no, la instalación estándar del laboratorio; si no,
-# rutas alternativas comunes (por si el script se distribuye a otros equipos).
+# ── 0a. Locate GROMACS ──────────────────────────────────────────────────────
+# First the PATH; otherwise, the most common install locations.
 if ! command -v gmx >/dev/null 2>&1; then
     for GMXRC in /usr/local/gromacs/bin/GMXRC \
                  /usr/local/gromacs/*/bin/GMXRC \
@@ -54,78 +59,79 @@ if ! command -v gmx >/dev/null 2>&1; then
     done
 fi
 if ! command -v gmx >/dev/null 2>&1; then
-    echo "❌ ERROR: no encuentro 'gmx' en el PATH ni un GMXRC en las rutas conocidas."
-    echo "   Verifica la instalación de GROMACS en esta máquina."
+    echo "❌ ERROR: 'gmx' not found in the PATH nor a GMXRC in the known locations."
+    echo "   Check the GROMACS installation on this machine."
     exit 1
 fi
 GMX_VER=$(gmx --version 2>/dev/null | awk -F: '/GROMACS version/{gsub(/ /,"",$2); print $2; exit}')
 echo "✓ GROMACS ${GMX_VER:-?}: $(command -v gmx)"
 
-# Sin funciones experimentales en producción (CUDA graphs puede venir activado
-# desde ~/.bashrc en algunas máquinas). Solo afecta a este script.
+# No experimental features in production (CUDA graphs may be enabled from
+# ~/.bashrc on some machines). Only affects this script.
 if [[ -n "${GMX_CUDA_GRAPH:-}" ]]; then
-    echo "ℹ GMX_CUDA_GRAPH estaba activo en el entorno: se desactiva (experimental)."
+    echo "ℹ GMX_CUDA_GRAPH was set in the environment: disabled (experimental)."
     unset GMX_CUDA_GRAPH
 fi
 
-# ── 0b. Verificar GPU (OBLIGATORIA) y núcleos disponibles ───────────────────
+# ── 0b. Check GPU (REQUIRED) and available cores ───────────────────────────
 NTOMP=$(nproc 2>/dev/null || echo 4)
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-    echo "✓ GPU detectada: $(nvidia-smi -L | head -n1)"
+    echo "✓ GPU detected: $(nvidia-smi -L | head -n1)"
 else
-    echo "❌ ERROR: este pipeline requiere GPU NVIDIA y no se detectó ninguna."
-    echo "   Verifica drivers (nvidia-smi) antes de correr en esta máquina."
+    echo "❌ ERROR: this pipeline requires an NVIDIA GPU and none was detected."
+    echo "   Check the drivers (nvidia-smi) before running on this machine."
     exit 1
 fi
 
-# Flags de mdrun (mismo esquema para 2080 / 3080 / 5090; GROMACS se adapta):
-# HARD = TODO en GPU incluido -update: máximo rendimiento (validado en Gelsolina)
-# SAFE = bonded/update en CPU: rescate automático para CUDA #700 / inestabilidad
-#        (-bonded/-update cpu explícitos: en 2026 'auto' deja ambos en GPU)
+# mdrun flags (same scheme for 2080 / 3080 / 5090; GROMACS adapts):
+# HARD = EVERYTHING on GPU including -update: maximum performance
+# SAFE = bonded/update on CPU: automatic rescue for CUDA #700 / instability
+#        (explicit -bonded/-update cpu: in 2026 'auto' leaves both on GPU)
 FLAGS_HARD="-pme gpu -nb gpu -bonded gpu -update gpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
 FLAGS_SAFE="-pme gpu -nb gpu -bonded cpu -update cpu -pmefft gpu -ntmpi 1 -ntomp ${NTOMP} -pin on"
 
-# ── Parámetros fijos ────────────────────────────────────────────────────────
-CHUNK_NS=100                     # tamaño de cada tramo (ns)
+# ── Fixed parameters ────────────────────────────────────────────────────────
+CHUNK_NS=100                     # size of each segment (ns)
 PROD_MDP="step5_production.mdp"
-PROD="step5_production"          # deffnm base (se renombra a dynamic<N>ns al final)
-STATE=".autogromacs_total_ns"    # aquí se persiste el objetivo TOTAL (para reanudar)
+PROD="step5_production"          # deffnm base (renamed to dynamic<N>ns at the end)
+STATE=".autogromacs_total_ns"    # the TOTAL target is stored here (for resuming)
 
-# Verificar insumos mínimos de CHARMM-GUI antes de arrancar
+# Check the minimum CHARMM-GUI inputs before starting
 for f in "$PROD_MDP" topol.top index.ndx; do
     if [[ ! -f "$f" ]]; then
-        echo "❌ ERROR: falta '$f'. ¿Estás dentro de la carpeta gromacs/ de CHARMM-GUI?"
+        echo "❌ ERROR: '$f' is missing. Are you inside the CHARMM-GUI gromacs/ folder?"
         exit 1
     fi
 done
 
-# ── 0c. Objetivo total de ns: argumento > estado guardado > preguntar ───────
+# ── 0c. Total ns target: argument > saved state > ask ───────────────────────
 TOTAL_NS="${1:-}"
 if [[ -z "$TOTAL_NS" && -f "$STATE" ]]; then
     TOTAL_NS=$(cat "$STATE")
-    echo "🔄 Reanudación detectada: objetivo guardado = ${TOTAL_NS} ns (de ${STATE})"
+    echo "🔄 Resume detected: saved target = ${TOTAL_NS} ns (from ${STATE})"
 fi
 if [[ -z "$TOTAL_NS" ]]; then
     if [[ -t 0 ]]; then
-        read -rp "¿Cuántos ns quieres simular en producción? " TOTAL_NS
+        read -rp "How many ns of production do you want to simulate? " TOTAL_NS
     else
-        echo "❌ Sin terminal interactiva y sin objetivo previo: pasa los ns como argumento."
-        echo "   Ejemplo:  nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &"
+        echo "❌ No interactive terminal and no previous target: give the ns as an argument."
+        echo "   Example:  nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &"
         exit 1
     fi
 fi
 if ! [[ "$TOTAL_NS" =~ ^[0-9]+$ ]] || (( TOTAL_NS < 1 )); then
-    echo "❌ Debes ingresar un entero de ns >= 1 (ej. 100, 200, 250)."; exit 1
+    echo "❌ You must enter an integer number of ns >= 1 (e.g. 100, 200, 250)."; exit 1
 fi
 echo "$TOTAL_NS" > "$STATE"
 
-# dt desde el .mdp (fallback 0.002 ps)
+# dt from the .mdp (fallback 0.002 ps)
 DT=$(awk -F= '/^[[:space:]]*dt[[:space:]]*=/{gsub(/[^0-9.]/,"",$2); print $2; exit}' "$PROD_MDP" 2>/dev/null)
 DT=${DT:-0.002}
 ns_to_steps(){ awk -v ns="$1" -v dt="$DT" 'BEGIN{printf "%.0f", ns*1000/dt}'; }
 
-# Leer el objetivo REAL del tpr vigente (fuente de verdad; evita desfases
-# si un corte ocurre justo entre extender el tpr y actualizar cualquier registro)
+# Read the REAL target from the current tpr (source of truth; avoids
+# mismatches if a cut happens right between extending the tpr and updating
+# any record)
 tpr_target_ns(){
     local nsteps
     nsteps=$(gmx dump -s "${PROD}.tpr" 2>/dev/null \
@@ -137,139 +143,140 @@ tpr_target_ns(){
 FINAL="dynamic${TOTAL_NS}ns"
 
 echo "═══════════════════════════════════════════════════════════════════════"
-echo " Autogromacs — objetivo: ${TOTAL_NS} ns   (dt=${DT} ps · tramos de ${CHUNK_NS} ns)"
-echo " Hardware: GPU + ${NTOMP} hilos CPU"
-echo " Salida final: ${FINAL}.{xtc,tpr,...}"
+echo " Autogromacs — target: ${TOTAL_NS} ns   (dt=${DT} ps · ${CHUNK_NS} ns segments)"
+echo " Hardware: GPU + ${NTOMP} CPU threads"
+echo " Final output: ${FINAL}.{xtc,tpr,...}"
 echo "═══════════════════════════════════════════════════════════════════════"
 
-# Si ya existe la salida final, no rehacer (evita sobrescribir resultados)
+# If the final output already exists, do not redo it (avoids overwriting results)
 if [[ -f ${FINAL}.xtc ]]; then
-    echo "⚠ Ya existe ${FINAL}.xtc en esta carpeta. Bórralo o elige otro tiempo para rehacer."
+    echo "⚠ ${FINAL}.xtc already exists in this folder. Delete it or choose another length to redo."
     exit 0
 fi
 
-# ── 1. Minimización (omitir si ya está hecha) ───────────────────────────────
+# ── 1. Minimization (skipped if already done) ───────────────────────────────
 if [[ ! -f step4.0_minimization.gro ]]; then
-    echo "=== MINIMIZACIÓN ==="
+    echo "=== MINIMIZATION ==="
     gmx grompp -f step4.0_minimization.mdp -o step4.0_minimization.tpr \
         -c step3_input.gro -r step3_input.gro -p topol.top -n index.ndx -maxwarn 1 || exit 1
     gmx mdrun -v -deffnm step4.0_minimization -ntmpi 1 -ntomp "${NTOMP}" || exit 1
 else
-    echo "✓ Minimización ya hecha, se omite."
+    echo "✓ Minimization already done, skipped."
 fi
 
-# ── 2. Equilibración (omitir si ya está hecha) ──────────────────────────────
+# ── 2. Equilibration (skipped if already done) ──────────────────────────────
 if [[ ! -f step4.1_equilibration.gro ]]; then
-    echo "=== EQUILIBRACIÓN ==="
+    echo "=== EQUILIBRATION ==="
     gmx grompp -f step4.1_equilibration.mdp -o step4.1_equilibration.tpr \
         -c step4.0_minimization.gro -r step3_input.gro -p topol.top -n index.ndx -maxwarn 1 || exit 1
     gmx mdrun -v -deffnm step4.1_equilibration $FLAGS_SAFE || exit 1
 else
-    echo "✓ Equilibración ya hecha, se omite."
+    echo "✓ Equilibration already done, skipped."
 fi
 
-# ── 3. Producción por tramos de ${CHUNK_NS} ns ──────────────────────────────
-# Preparar el tpr del primer tramo si aún no existe
+# ── 3. Production in ${CHUNK_NS} ns segments ────────────────────────────────
+# Prepare the tpr of the first segment if it does not exist yet
 if [[ ! -f ${PROD}.tpr ]]; then
     FIRST_NS=$(( TOTAL_NS < CHUNK_NS ? TOTAL_NS : CHUNK_NS ))
-    echo "=== PRODUCCIÓN: preparando primer tramo de ${FIRST_NS} ns ==="
-    # continuation=yes en el .mdp: tomar velocidades/estado exactos del .cpt de
-    # la equilibración (más preciso que el .gro) si existe
+    echo "=== PRODUCTION: preparing first segment of ${FIRST_NS} ns ==="
+    # continuation=yes in the .mdp: take the exact velocities/state from the
+    # equilibration .cpt (more precise than the .gro) if it exists
     EQ_CPT=""
     [[ -f step4.1_equilibration.cpt ]] && EQ_CPT="-t step4.1_equilibration.cpt"
     gmx grompp -f "$PROD_MDP" -o ${PROD}.tpr \
         -c step4.1_equilibration.gro $EQ_CPT -p topol.top -n index.ndx -maxwarn 1 || exit 1
-    # Fijar nsteps del primer tramo escribiendo a un temporal y luego mv
+    # Set nsteps of the first segment by writing to a temporary file, then mv
     gmx convert-tpr -s ${PROD}.tpr -nsteps "$(ns_to_steps "$FIRST_NS")" -o ${PROD}_tmp.tpr || exit 1
     mv -f ${PROD}_tmp.tpr ${PROD}.tpr
 fi
 
-# Objetivo vigente leído SIEMPRE del propio tpr (a prueba de cortes)
+# Current target ALWAYS read from the tpr itself (robust to interruptions)
 TARGET_NS=$(tpr_target_ns)
 if (( TARGET_NS == 0 )); then
-    echo "❌ ERROR: no pude leer nsteps de ${PROD}.tpr (¿archivo corrupto?)."; exit 1
+    echo "❌ ERROR: could not read nsteps from ${PROD}.tpr (corrupt file?)."; exit 1
 fi
 if (( TARGET_NS > TOTAL_NS )); then
-    echo "⚠ El tpr actual ya apunta a ${TARGET_NS} ns, más que el objetivo (${TOTAL_NS} ns)."
-    echo "  Se completará hasta ${TARGET_NS} ns y se renombrará como dynamic${TARGET_NS}ns.*"
+    echo "⚠ The current tpr already targets ${TARGET_NS} ns, more than the goal (${TOTAL_NS} ns)."
+    echo "  It will run up to ${TARGET_NS} ns and be renamed dynamic${TARGET_NS}ns.*"
     TOTAL_NS=$TARGET_NS
     FINAL="dynamic${TOTAL_NS}ns"
     echo "$TOTAL_NS" > "$STATE"
 fi
 
-# Monitor de GPU en segundo plano (opcional, no altera la simulación)
+# GPU monitor in the background (optional, does not affect the simulation)
 GPU_PID=""
 nvidia-smi dmon -s puct -d 10 >> gpu_monitor.log 2>&1 &
 GPU_PID=$!
 cleanup(){ [[ -n "$GPU_PID" ]] && kill "$GPU_PID" 2>/dev/null || true; }
 trap cleanup EXIT
 
-# Flags de continuación: -cpi/-append SOLO si ya existe el .cpt. GROMACS 2026
-# aborta con "-append" sin checkpoint (otras versiones pueden tolerarlo). Se evalúa en cada
-# intento para que el reintento SAFE continúe desde el .cpt que dejó el HARD.
+# Continuation flags: -cpi/-append ONLY if the .cpt exists. GROMACS 2026
+# aborts with "-append" and no checkpoint (other versions may tolerate it).
+# Evaluated on every attempt so the SAFE retry continues from the .cpt left
+# by HARD.
 cpt_flags(){
     if [[ -f ${PROD}.cpt ]]; then
         echo "-cpi ${PROD}.cpt -append"
     fi
 }
 
-# Interrupciones (Ctrl-C, kill, apagado): mdrun se detiene ordenadamente,
-# guarda checkpoint y sale con código 1 — igual que un fallo real. Para NO
-# confundirlo con un fallo de GPU (y saltar a SAFE) se detecta por:
-#   a) la señal llegando al propio script (Ctrl-C en la terminal), o
-#   b) el mensaje "Received the ... signal" que mdrun escribe en su log
-#      (cuando se mata solo el proceso mdrun, p.ej. con nohup + kill).
+# Interruptions (Ctrl-C, kill, shutdown): mdrun stops cleanly, writes a
+# checkpoint and exits with code 1 — just like a real failure. To NOT mistake
+# it for a GPU failure (and jump to SAFE) it is detected by:
+#   a) the signal reaching the script itself (Ctrl-C in the terminal), or
+#   b) the "Received the ... signal" message mdrun writes to its log
+#      (when only the mdrun process is killed, e.g. with nohup + kill).
 INTERRUPTED=0
 trap 'INTERRUPTED=1' INT TERM HUP
-# Solo se miran las líneas del log escritas en ESTE intento (LOG_START), para
-# no confundir un aviso de señal de una corrida anterior con la actual.
+# Only the log lines written in THIS attempt (LOG_START) are checked, so a
+# signal notice from a previous run is not confused with the current one.
 log_lines(){ local n; n=$(wc -l < ${PROD}.log 2>/dev/null); echo "${n:-0}"; }
 log_says_signal(){
     local start=$LOG_START
-    (( $(log_lines) < start )) && start=0     # mdrun creó un log nuevo
+    (( $(log_lines) < start )) && start=0     # mdrun created a new log
     awk -v a="$start" 'NR>a && /Received the .* signal/{f=1} END{exit !f}' \
         ${PROD}.log 2>/dev/null
 }
 stop_if_interrupted(){
     if (( INTERRUPTED )) || log_says_signal; then
-        echo "⏹ mdrun interrumpido por señal; el checkpoint quedó guardado."
-        echo "   Re-ejecuta 'bash Autogromacs.sh' (sin argumentos) para reanudar."
+        echo "⏹ mdrun interrupted by a signal; the checkpoint was saved."
+        echo "   Run 'bash Autogromacs.sh' again (no arguments) to resume."
         exit 130
     fi
 }
 
-# Un tramo de mdrun con reintento automático en modo estable.
+# One mdrun segment with automatic retry in stable mode.
 run_chunk(){
-    echo "── mdrun [HARD: todo en GPU, máximo rendimiento] ──"
+    echo "── mdrun [HARD: everything on GPU, maximum performance] ──"
     LOG_START=$(log_lines)
     gmx mdrun -v -deffnm ${PROD} -s ${PROD}.tpr $(cpt_flags) $FLAGS_HARD && return 0
     stop_if_interrupted
-    echo "⚠ El modo HARD falló (¿CUDA #700 / inestabilidad?)."
-    echo "🚑 Reintentando en MODO SAFE (bonded/update en CPU) desde el checkpoint..."
+    echo "⚠ HARD mode failed (CUDA #700 / instability?)."
+    echo "🚑 Retrying in SAFE MODE (bonded/update on CPU) from the checkpoint..."
     LOG_START=$(log_lines)
     gmx mdrun -v -deffnm ${PROD} -s ${PROD}.tpr $(cpt_flags) $FLAGS_SAFE
 }
 
-# Bucle de tramos: corre/continúa hasta TARGET_NS, luego extiende, hasta TOTAL_NS
+# Segment loop: run/continue up to TARGET_NS, then extend, until TOTAL_NS
 while :; do
-    echo "── Producción: corriendo/continuando hasta ${TARGET_NS} ns ──"
+    echo "── Production: running/continuing up to ${TARGET_NS} ns ──"
     if ! run_chunk; then
         stop_if_interrupted
-        echo "❌ mdrun falló incluso en modo estable. Revisa ${PROD}.log"
-        echo "   (busca LINCS warnings o energía positiva: el sistema pudo explotar)."
+        echo "❌ mdrun failed even in stable mode. Check ${PROD}.log"
+        echo "   (look for LINCS warnings or positive energy: the system may have blown up)."
         exit 1
     fi
 
     if (( TARGET_NS >= TOTAL_NS )); then
-        echo "✓ Producción completa: ${TARGET_NS} ns alcanzados."
+        echo "✓ Production complete: ${TARGET_NS} ns reached."
         break
     fi
 
     REMAIN=$(( TOTAL_NS - TARGET_NS ))
     NEXT_NS=$(( REMAIN < CHUNK_NS ? REMAIN : CHUNK_NS ))
     EXT_PS=$(( NEXT_NS * 1000 ))
-    echo "=== Extendiendo +${NEXT_NS} ns (${EXT_PS} ps) ==="
-    # Escribir a temporal y luego mv: nunca dejamos un tpr a medio escribir
+    echo "=== Extending +${NEXT_NS} ns (${EXT_PS} ps) ==="
+    # Write to a temporary file, then mv: never leave a half-written tpr
     gmx convert-tpr -s ${PROD}.tpr -extend "$EXT_PS" -o ${PROD}_tmp.tpr || exit 1
     mv -f ${PROD}_tmp.tpr ${PROD}.tpr
     TARGET_NS=$(tpr_target_ns)
@@ -277,8 +284,8 @@ done
 
 cleanup; trap - EXIT
 
-# ── 4. Renombrar salida final a dynamic<N>ns.* ──────────────────────────────
-echo "=== Renombrando salida a ${FINAL}.* ==="
+# ── 4. Rename final output to dynamic<N>ns.* ────────────────────────────────
+echo "=== Renaming output to ${FINAL}.* ==="
 for ext in xtc trr tpr edr log gro cpt; do
     [[ -f ${PROD}.${ext} ]] && mv -f ${PROD}.${ext} ${FINAL}.${ext} && echo "  ✓ ${PROD}.${ext} → ${FINAL}.${ext}"
 done
@@ -286,6 +293,6 @@ done
 rm -f "$STATE"
 
 echo "═══════════════════════════════════════════════════════════════════════"
-echo " LISTO. Trayectoria de ${TOTAL_NS} ns:  ${FINAL}.xtc  /  ${FINAL}.tpr"
-echo " Siguiente paso: bash basic_analyses_with_names.sh  (auto-detecta ${FINAL})"
+echo " DONE. ${TOTAL_NS} ns trajectory:  ${FINAL}.xtc  /  ${FINAL}.tpr"
+echo " Next step: bash basic_analyses_with_names.sh  (auto-detects ${FINAL})"
 echo "═══════════════════════════════════════════════════════════════════════"

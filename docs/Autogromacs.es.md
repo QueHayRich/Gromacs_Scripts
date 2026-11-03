@@ -9,11 +9,11 @@
 **Pipeline automático, reanudable y por tramos de dinámica molecular en
 GROMACS para sistemas de CHARMM-GUI en GPUs NVIDIA.**
 
-`Autogromacs.sh` es un solo script de Bash, autosuficiente. Lo copias a una
+`Autogromacs.es.sh` es un solo script de Bash, autosuficiente. Lo copias a una
 carpeta `gromacs/` de CHARMM-GUI recién descargada y corre todo el flujo
 (minimización de energía → equilibración → producción) por el tiempo que le
-pidas. Funciona sin cambios en cualquier máquina del laboratorio y se
-recupera solo de fallos, cortes de luz y errores de la GPU.
+pidas. Funciona sin cambios en cualquier máquina y con cualquier sistema
+proteína–ligando, y se recupera solo de fallos, cortes de luz y errores de la GPU.
 
 ---
 
@@ -104,19 +104,19 @@ alguno; normalmente significa que no se corrió dentro de la carpeta
 
 ```bash
 cd /ruta/a/mi_sistema/gromacs
-cp /ruta/a/Autogromacs.sh .
+cp /ruta/a/Autogromacs.es.sh .
 
 # Interactivo: pregunta cuántos ns de producción quieres
-bash Autogromacs.sh
+bash Autogromacs.es.sh
 
 # No interactivo (recomendado para corridas largas; sobrevive a cerrar la terminal)
-nohup bash Autogromacs.sh 200 > autogromacs.log 2>&1 &
+nohup bash Autogromacs.es.sh 200 > autogromacs.log 2>&1 &
 
 # Seguir el avance
 tail -f autogromacs.log
 
 # Después de un fallo, corte de luz o Ctrl-C: vuelve a correrlo sin argumentos
-bash Autogromacs.sh
+bash Autogromacs.es.sh
 ```
 
 La duración debe ser un número entero de ns ≥ 1 (p. ej. `100`, `200`,
@@ -167,7 +167,7 @@ corrida la duración **debe** pasarse como argumento.
 
 La duración total de la producción se toma, en este orden, de:
 
-1. el argumento de la línea de comandos (`bash Autogromacs.sh 200`);
+1. el argumento de la línea de comandos (`bash Autogromacs.es.sh 200`);
 2. el archivo oculto de estado `.autogromacs_total_ns`, escrito en la
    primera corrida;
 3. una pregunta interactiva.
@@ -255,9 +255,9 @@ extensión interrumpida no puede dejar un `.tpr` a medio escribir.
 Solo vuelve a correr el script en la misma carpeta, sin argumentos:
 
 ```bash
-bash Autogromacs.sh
+bash Autogromacs.es.sh
 # o
-nohup bash Autogromacs.sh > autogromacs.log 2>&1 &
+nohup bash Autogromacs.es.sh > autogromacs.log 2>&1 &
 ```
 
 Qué pasa depende de dónde se cortó:
@@ -271,7 +271,7 @@ Qué pasa depende de dónde se cortó:
 | Después de renombrar | Existe `dynamic<N>ns.xtc`; el script lo avisa y sale. |
 
 **Si cambias de opinión sobre la duración.** Puedes alargar una corrida
-dando un número mayor al reanudar (`bash Autogromacs.sh 300`). Si el `.tpr`
+dando un número mayor al reanudar (`bash Autogromacs.es.sh 300`). Si el `.tpr`
 ya apunta a más de lo que indicas, el script termina hasta el objetivo del
 `.tpr` y nombra la salida de acuerdo con él.
 
@@ -364,7 +364,7 @@ driver (`nvidia-smi` en una terminal) y reinicia si se acaba de actualizar.
 dentro de la carpeta `gromacs/` de CHARMM-GUI.
 
 **`Sin terminal interactiva y sin objetivo previo`** — con `nohup`, la primera
-corrida necesita la duración como argumento: `nohup bash Autogromacs.sh 200 ...`.
+corrida necesita la duración como argumento: `nohup bash Autogromacs.es.sh 200 ...`.
 
 **Falla también en modo SAFE** — busca en `step5_production.log`
 `LINCS warnings`, `Segmentation fault` o una energía potencial grande y
@@ -403,9 +403,10 @@ están.
 
 ## 13. Limitaciones
 
-- Solo la nomenclatura de CHARMM-GUI **Solution Builder** (`step4.0`,
-  `step4.1`, `step5`). Los sistemas de Membrane Builder (`step6.x` /
-  `step7`) todavía no están soportados.
+- **Solo sistemas solubles.** Solo la nomenclatura de CHARMM-GUI **Solution
+  Builder** (`step4.0`, `step4.1`, `step5`). Los sistemas con membrana
+  (Membrane Builder, `step6.x` / `step7`) quedan fuera del alcance de este
+  repositorio y no se corren.
 - Requiere una GPU NVIDIA; no hay modo solo-CPU.
 - Una sola GPU por corrida (`-ntmpi 1`).
 

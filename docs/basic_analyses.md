@@ -25,7 +25,7 @@ snapshots), with no interactive menus and nothing to edit.
 2. [Requirements](#2-requirements)
 3. [Quick start](#3-quick-start)
 4. [How the trajectory is detected](#4-how-the-trajectory-is-detected)
-5. [The index file and the Ligand group](#5-the-index-file-and-the-ligand-group)
+5. [Receptor, ligands and the index file](#5-receptor-ligands-and-the-index-file)
 6. [The analyses, one by one](#6-the-analyses-one-by-one)
 7. [Special cases](#7-special-cases)
 8. [Output files](#8-output-files)
@@ -37,22 +37,22 @@ snapshots), with no interactive menus and nothing to edit.
 
 ## 1. Why "with names"
 
-The original lab script sent group **numbers** to the GROMACS tools, for
+A common way to script GROMACS is to send group **numbers** to the tools, for
 example `echo 4 13 | gmx rms ...`. Those numbers depend on what the system
 contains (ligand, ions, lipids...) and change from one system to another, so
 the same script could quietly analyse the wrong group.
 
 This version builds its own index file and always passes groups **by name**
-(`Protein`, `Backbone`, `Ligand`, `System`), so the same file gives the
-correct result on every system.
+(`Receptor`, `Receptor_BB`, `Ligand_<name>`, `System`), so the same file gives
+the correct result on every system, whatever the protein and the ligand.
 
-| Analysis | Old script (numbers) | This script (names) |
+| Analysis | With numbers | This script (names) |
 |---|---|---|
-| Centered trajectory | `1 0` | `Protein`, `System` |
-| RMSD | `4 13` | `Backbone`, `Ligand` |
-| H-bonds | `1 13` | `Protein`, `Ligand` |
-| RMSF | `1` | `Protein` |
-| Radius of gyration | `1` | `Protein` |
+| Centered trajectory | `1 0` | `Receptor`, `System` |
+| RMSD | `4 13` | `Receptor_BB`, `Ligand_<name>` |
+| H-bonds | `1 13` | `Receptor`, `Ligand_<name>` |
+| RMSF | `1` | `Receptor` |
+| Radius of gyration | `1` | `Receptor` |
 | Snapshots | `0` | `System` |
 
 ## 2. Requirements
@@ -61,10 +61,14 @@ correct result on every system.
   is taken from the `PATH` or loaded from a standard `GMXRC`
   (`/usr/local/gromacs/bin`, `/usr/local/gromacs/*/bin`, `/opt/gromacs/bin`,
   `~/gromacs/bin`). No GPU is needed.
+- **Python 3** (standard library only), used to read `topol.top`.
 - A **finished production run** in the current folder:
   `dynamic<N>ns.{tpr,xtc}` (Autogromacs output) or
   `step5_production*.{tpr,xtc}` (a CHARMM-GUI run made by hand).
-- The CHARMM-GUI **`index.ndx`**, which provides the `SOLU` group.
+- The CHARMM-GUI **`topol.top`** and the `.itp` files it includes, from
+  which receptor and ligands are detected.
+- A **soluble protein system** (CHARMM-GUI Solution Builder / Ligand Reader).
+  Membrane systems are not supported by this repository.
 
 ## 3. Quick start
 
@@ -74,6 +78,7 @@ cp /path/to/basic_analyses_with_names.sh .
 
 bash basic_analyses_with_names.sh                 # auto-detects the trajectory
 bash basic_analyses_with_names.sh dynamic150ns    # or name the basename
+bash basic_analyses_with_names.sh --help          # all options
 ```
 
 For long trajectories you can leave it running in the background:
@@ -87,8 +92,13 @@ At start-up the script prints what it found, for example:
 ```
 ✓ GROMACS: /usr/local/gromacs/bin/gmx
 ═══ ComplexA · dynamic200ns.xtc · 200 ns → Analyses/ ═══
-✓ Ligand group created (SOLU minus Protein).
+ Receptor : PROA (128 residues)
+ Ligands  : LIG (104 atoms, no N/O → contacts)
+ Ignored  : POT(x23), CLA(x23), TIP3(x8179)
 ```
+
+Read these three lines before using the results: they say exactly what was
+taken as receptor, what as ligand and what was left out.
 
 ## 4. How the trajectory is detected
 
@@ -99,29 +109,50 @@ In this order:
 2. The **newest** `dynamic*ns.tpr` that has a matching `.xtc`.
 3. `step5_production.xtc` with the newest `step5_production*.tpr`.
 
-If none is found, or `index.ndx` is missing, the script stops with a clear
+If none is found, or `topol.top` is missing, the script stops with a clear
 message.
 
 **Simulation length.** It is taken from the `dynamic<N>ns` name. For other
 names it is read from the `.tpr` (`gmx dump`, `nsteps × dt`). The length is
 used in the output file names (`_200ns`) and to place the snapshots.
 
-## 5. The index file and the Ligand group
+## 5. Receptor, ligands and the index file
 
-The script never modifies the CHARMM-GUI `index.ndx`. It creates its own
-`Analyses/index_analysis.ndx`:
+Receptor and ligands are detected from the **`[ molecules ]` section of
+`topol.top`** (following its `#include` files), the same way
+[Free Energy](free_energy.md) does it, so both tools always agree on what the
+ligand is. Each molecule type is classified as:
 
-1. `gmx make_ndx` writes the GROMACS default groups (`System`, `Protein`,
-   `Backbone`, `C-alpha`, ...).
-2. The `SOLU` group is copied from the CHARMM-GUI `index.ndx`. `SOLU` holds
-   everything that is not water or ions: protein plus ligand(s).
-3. A new group is defined as `"SOLU" & ! "Protein"` and named **`Ligand`**.
+| Kind | Rule | Used as |
+|---|---|---|
+| Protein | named `PROA`, `PROB`, ... or mostly amino-acid residues | **Receptor** |
+| Water | `TIP3`, `SOL`, `HOH`, ... | ignored |
+| Ions | `POT`, `CLA`, `SOD`, ... or a single charged atom | ignored |
+| Anything with more than 5 copies | lipids, cosolvents, crowders | ignored (with a note) |
+| Everything else | small molecules, microplastic oligomers, cofactors... | **one ligand per molecule type** |
 
-So `Ligand` is **everything in `SOLU` that is not protein**, whatever the
-residue is called (a small molecule, an oligomer of a microplastic, a
-cofactor, several copies of a ligand...). If that group comes out empty, the
-system has no ligand and the script switches to the protein-only analyses
-(see [Special cases](#7-special-cases)).
+**Each ligand is analysed separately.** If a system contains, for example, a
+microplastic and an endogenous ligand, or a ligand and a cofactor, each one
+gets its own group (`Ligand_<name>`) and its own RMSD and H-bond/contact
+files, so their results are never mixed. Copies of the same molecule (e.g.
+three identical oligomers) are analysed together in one group.
+
+The script never modifies the CHARMM-GUI `index.ndx`. It writes its own
+`Analyses/index_analysis.ndx` with the GROMACS default groups (`System`,
+`Protein`, `Backbone`, ...) plus `Receptor`, `Receptor_BB` (N, CA, C of the
+receptor) and one `Ligand_<name>` per ligand.
+
+**Choosing by hand.** Only needed in special cases; the names are those of
+`[ molecules ]` (or a residue name):
+
+```bash
+bash basic_analyses_with_names.sh --ligand LIG            # leave out a cofactor (only LIG)
+bash basic_analyses_with_names.sh --ligand PROB --receptor PROA   # peptide chain as ligand
+bash basic_analyses_with_names.sh --ligand LIG,HEME       # several, each analysed separately
+```
+
+`--ligand` also lets you include a molecule with more than 5 copies (e.g.
+many microplastic oligomers in the same box).
 
 ## 6. The analyses, one by one
 
@@ -130,7 +161,7 @@ All time axes are in **ns**. Analyses 2–6 use the centered trajectory.
 ### 6.1 Centered trajectory
 
 ```
-gmx trjconv -pbc mol -center    (center: Protein · output: System)
+gmx trjconv -pbc mol -center    (center: Receptor · output: System)
 ```
 
 Makes molecules whole across the periodic boundaries and puts the protein at
@@ -142,7 +173,7 @@ reused.
 ### 6.2 Ligand RMSD
 
 ```
-gmx rms    (fit: Backbone · calc: Ligand)
+gmx rms    (fit: Receptor_BB · calc: Ligand_<name>)    one per ligand
 ```
 
 Each frame is superimposed on the protein backbone of the reference
@@ -154,10 +185,10 @@ another site or left the pocket.
 Without a ligand, the backbone RMSD is computed instead (overall protein
 stability).
 
-### 6.3 Protein–ligand hydrogen bonds
+### 6.3 Receptor–ligand hydrogen bonds
 
 ```
-gmx hbond -r Protein -t Ligand     (new syntax, GROMACS 2024+)
+gmx hbond -r Receptor -t Ligand_<name>     (new syntax, GROMACS 2024+), one per ligand
 ```
 
 Number of hydrogen bonds between protein and ligand in each frame. If the
@@ -168,7 +199,7 @@ zero for most of the run suggests a weak or non-specific binding.
 ### 6.4 RMSF per residue
 
 ```
-gmx rmsf -res    (Protein)
+gmx rmsf -res    (Receptor)
 ```
 
 Average fluctuation of each residue around its mean position. Peaks are
@@ -179,7 +210,7 @@ by the ligand.
 ### 6.5 Radius of gyration
 
 ```
-gmx gyrate    (Protein)
+gmx gyrate    (Receptor)
 ```
 
 Compactness of the protein over time. A stable value means the fold is
@@ -197,23 +228,33 @@ complex changed and to prepare figures.
 
 ## 7. Special cases
 
-**No ligand (apo protein).** The `Ligand` group is empty, so RMSD is computed
-on the `Backbone` and H-bonds within the `Protein`. The script reports:
-`✓ No ligand in SOLU: RMSD on Backbone, H-bonds within Protein.`
+**No ligand (apo protein).** RMSD is computed on the receptor backbone and
+H-bonds within the receptor. The script reports:
+`Ligands  : none (apo): RMSD on the receptor backbone, H-bonds within the receptor`
 
-**Ligands with no N, O, S or F atoms** (polyethylene, polypropylene,
-polystyrene and other C/H-only microplastics). They have no H-bond donors or
-acceptors, and `gmx hbond` refuses to run. The script reads the ligand atoms
-from the structure, sees that none is N/O/S/F, and computes
-**protein–ligand contacts** instead:
+**Several ligands.** Each one is analysed separately and its name is added
+to the RMSD and H-bond/contact files (see [Output files](#8-output-files)).
+RMSF, radius of gyration and snapshots are computed once, for the receptor
+and the whole system.
+
+**Peptide or protein as ligand.** A peptide is a protein for GROMACS, so by
+default it is taken as part of the receptor. Use
+`--ligand PROB --receptor PROA` (with your chain names).
+
+**Ligands with no N or O atoms** (polyethylene, polypropylene,
+polystyrene, PVC, PTFE and other such microplastics). `gmx hbond` only uses
+N and O as donors/acceptors, so it has nothing to count and refuses to run.
+The script reads the ligand atoms from the structure, sees that none is N or
+O, and computes
+**receptor–ligand contacts** instead:
 
 ```
-gmx mindist -d 0.4    (Protein · Ligand)
+gmx mindist -d 0.4    (Receptor · Ligand_<name>)
 ```
 
-- `contacts_<name>_<N>ns.xvg`: number of protein–ligand atom pairs closer
+- `contacts_<name>_<N>ns.xvg`: number of receptor–ligand atom pairs closer
   than 0.4 nm in each frame (how much the ligand touches the protein).
-- `mindist_<name>_<N>ns.xvg`: minimum protein–ligand distance in each frame
+- `mindist_<name>_<N>ns.xvg`: minimum receptor–ligand distance in each frame
   (whether the ligand stays bound or drifts away).
 
 **A failing H-bond or contact analysis does not stop the script.** It prints
@@ -225,24 +266,27 @@ Everything goes to `Analyses/` inside the `gromacs/` folder:
 
 ```
 Analyses/
-├── index_analysis.ndx            # default groups + SOLU + Ligand
+├── index_analysis.ndx            # default groups + Receptor, Receptor_BB, Ligand_<lig>
 ├── dynamic<N>ns_centered.xtc     # centered trajectory (reused on re-runs)
 ├── rmsd_<name>_<N>ns.xvg         # ligand RMSD (backbone RMSD if no ligand)
-├── hbond_<name>_<N>ns.xvg        # protein–ligand H-bonds
-│   or contacts_<name>_<N>ns.xvg  #   contacts < 0.4 nm   (C/H-only ligands)
-│      mindist_<name>_<N>ns.xvg   #   minimum distance    (C/H-only ligands)
+├── hbond_<name>_<N>ns.xvg        # receptor–ligand H-bonds
+│   or contacts_<name>_<N>ns.xvg  #   contacts < 0.4 nm   (ligands without N/O)
+│      mindist_<name>_<N>ns.xvg   #   minimum distance    (ligands without N/O)
 ├── rmsf_<name>_<N>ns.xvg         # RMSF per residue
 ├── gyrate_<name>_<N>ns.xvg       # radius of gyration
 └── trj_<name>_<N>ns.pdb          # snapshots: start / middle / end
 ```
 
 `<name>` is the current folder name (usually `gromacs`) and `<N>` the
-simulation length in ns. Running the script again overwrites the `.xvg` and
+simulation length in ns. With **more than one ligand**, the RMSD and
+H-bond/contact files carry the ligand name too, e.g.
+`rmsd_gromacs_LIG_200ns.xvg` and `rmsd_gromacs_HEME_200ns.xvg`; with one
+ligand the names are exactly as above. Running the script again overwrites the `.xvg` and
 `.pdb` files but reuses the centered trajectory.
 
 ## 9. Copying to shared project folders
 
-Many projects in the lab keep the results of all systems side by side:
+Many projects keep the results of all systems side by side:
 
 ```
 Project/
@@ -259,6 +303,7 @@ renamed with the **system name** (the folder that contains `gromacs/`):
 ```
 ../../rmsd/rmsd_ComplexA_200ns.xvg
 ../../conformation/trj_ComplexA_200ns.pdb
+../../rmsd/rmsd_ComplexA_LIG_200ns.xvg      (with several ligands)
 ```
 
 so results from different systems never overwrite each other. Folders that
@@ -291,13 +336,21 @@ skipping the comment lines.
 `step5_production.*` in the folder, or the `.xtc` does not match the `.tpr`
 name. Pass the basename explicitly.
 
-**`index.ndx not found`** — run the script inside the CHARMM-GUI `gromacs/`
+**`topol.top not found`** — run the script inside the CHARMM-GUI `gromacs/`
 folder.
 
-**The Ligand group contains something unexpected** (e.g. a cofactor you did
-not want) — the group is "everything in SOLU that is not protein". Check
-`Analyses/index_analysis.ndx`, or edit the `Ligand` group there and run the
-specific `gmx` command by hand.
+**`python3 not found`** — install Python 3 (any version; only the standard
+library is used).
+
+**The ligands are not what you expected** (a cofactor you did not want, a
+ligand with many copies left out, a peptide inside the receptor) — check the
+`Receptor / Ligands / Ignored` lines at the start and choose by hand with
+`--ligand` and `--receptor` (see
+[section 5](#5-receptor-ligands-and-the-index-file)).
+
+**`no protein found to use as receptor`** — the folder has no protein (e.g. a
+CHARMM-GUI run of the ligand alone). Use `--receptor NAME` if the receptor is
+not a protein.
 
 **Snapshots look broken across the box** — use the centered trajectory
 (`Analyses/*_centered.xtc`) for any extra analysis, not the raw `.xtc`.
